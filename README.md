@@ -62,13 +62,14 @@ Your system now matches your declaration. Packages installed, environment config
 
 ### What Makes sys.lua Different
 
-✨ **Lua instead of Nix language** - Familiar, widely-used, easy to learn
-📦 **Prebuilt binaries first** - Install instantly without compilation
-🔒 **Reproducible by default** - Lock files pin exact versions
-🎯 **Module system** - NixOS-style composability without the complexity
-🌍 **True cross-platform** - Linux, macOS, and Windows as first-class citizens
-🔐 **Built-in secrets management** - SOPS integration for sensitive data
-⚡ **Fast and simple** - Content-addressed store with human-readable layout
+✨ **Lua instead of Nix language** - Familiar, widely-used, easy to learn  
+📦 **Prebuilt binaries first** - Install instantly without compilation  
+🔒 **Reproducible by default** - Lock files pin exact versions  
+👥 **Per-user configuration** - System and user-level configs coexist seamlessly  
+🎯 **Module system** - NixOS-style composability without the complexity  
+🌍 **True cross-platform** - Linux, macOS, and Windows as first-class citizens  
+🔐 **Built-in secrets management** - SOPS integration for sensitive data  
+⚡ **Fast and simple** - Content-addressed store with human-readable layout  
 🔄 **Atomic operations** - Apply succeeds completely or rolls back entirely
 
 ## Key Features
@@ -94,7 +95,59 @@ pkg(inputs.pkgs.python, "3.11.7")
 pkg(inputs.pkgs.python, "3.12.0")
 ```
 
-### 2. Reproducible Environments
+### 2. User-Scoped Configuration
+
+System-level and user-level configurations coexist seamlessly. Each user gets their own isolated environment while sharing system packages:
+
+```lua
+-- System-level packages (available to all users)
+pkg("git")
+pkg("curl")
+
+-- Per-user configuration
+user {
+    name = "ian",
+    config = function()
+        -- User-scoped packages (only in ian's PATH)
+        pkg("neovim")
+        pkg("ripgrep")
+
+        -- User-scoped dotfiles
+        file {
+            path = "~/.gitconfig",
+            content = [[
+[user]
+    name = Ian
+    email = ian@example.com
+]],
+        }
+
+        -- User-scoped environment
+        env {
+            EDITOR = "nvim",
+            PATH = lib.mkBefore({ "$HOME/.local/bin" }),
+        }
+    end,
+}
+
+user {
+    name = "admin",
+    config = function()
+        pkg("htop")
+        pkg("docker")
+    end,
+}
+```
+
+**Each user sources their own environment:**
+
+```bash
+# In ~/.bashrc or ~/.zshrc
+[ -f ~/.local/share/sys/env.sh ] && source ~/.local/share/sys/env.sh
+[ -f ~/.local/share/sys/users/ian/env.sh ] && source ~/.local/share/sys/users/ian/env.sh
+```
+
+### 3. Reproducible Environments
 
 Lock files ensure your team uses identical package versions:
 
@@ -108,7 +161,7 @@ $ git pull
 $ sudo sys apply sys.lua  # Uses pinned versions from sys.lock
 ```
 
-### 3. NixOS-Style Modules
+### 4. NixOS-Style Modules
 
 Reusable, composable configuration modules:
 
@@ -142,7 +195,7 @@ docker.options.enable = true
 docker.options.rootless = false
 ```
 
-### 4. Priority-Based Conflict Resolution
+### 5. Priority-Based Conflict Resolution
 
 When multiple declarations conflict, priorities determine the winner:
 
@@ -159,7 +212,7 @@ env { PATH = lib.mkAfter({ "/usr/local/games" }) }
 -- Result: $HOME/.cargo/bin:$PATH:/usr/local/games
 ```
 
-### 5. Built-in Secrets Management
+### 6. Built-in Secrets Management
 
 SOPS integration keeps credentials secure:
 
@@ -177,7 +230,7 @@ local inputs = {
 }
 ```
 
-### 6. Atomic Rollbacks
+### 7. Atomic Rollbacks
 
 Every `sys apply` creates a snapshot. Rollback instantly if something breaks:
 
@@ -191,7 +244,7 @@ Snapshots:
 $ sudo sys rollback 4  # Instant rollback to snapshot #4
 ```
 
-### 7. Cross-Platform
+### 8. Cross-Platform
 
 First-class support for Linux, macOS, and Windows:
 
