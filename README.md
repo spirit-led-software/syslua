@@ -13,7 +13,7 @@ sys.lua reimagines system configuration management by combining three powerful i
 3. **Simplicity** - No PhD required. Just Lua and straightforward concepts
 
 ```lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 -- Declare your desired system state
 local inputs = {
@@ -45,7 +45,7 @@ file {
 **Apply it:**
 
 ```bash
-$ sudo sys apply sys.lua
+$ sudo sys apply
 ```
 
 Your system now matches your declaration. Packages installed, environment configured, dotfiles in place.
@@ -153,12 +153,12 @@ Lock files ensure your team uses identical package versions:
 
 ```bash
 # Developer A: Add packages and commit lock file
-$ sudo sys apply sys.lua  # Creates sys.lock
-$ git add sys.lua sys.lock && git commit
+$ sudo sys apply  # Creates syslua.lock
+$ git add . && git commit
 
 # Developer B: Get exact same versions
 $ git pull
-$ sudo sys apply sys.lua  # Uses pinned versions from sys.lock
+$ sudo sys apply  # Uses pinned versions from syslua.lock
 ```
 
 ### 4. NixOS-Style Modules

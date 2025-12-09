@@ -14,12 +14,12 @@ To ensure consistency throughout this document, key terms are defined here:
 | **Registry**            | A repository of package definitions (Lua files). The official registry is `github:sys-lua/pkgs`. Accessed via inputs. |
 | **Package Set**         | The collection of package definitions available from a specific input. Synonymous with "registry" in context.         |
 | **Manifest**            | The intermediate representation produced by evaluating Lua config. Contains resolved packages, files, env vars, etc.  |
-| **Config**              | The user's `sys.lua` file (Lua code) that declares desired system state.                                              |
+| **Config**              | The user's `init.lua` file (Lua code) that declares desired system state.                                             |
 | **Store**               | The global, immutable location where packages are installed (`/syslua/store`).                                        |
 | **Store Object**        | An immutable, content-addressed directory in `store/obj/<hash>/`.                                                     |
 | **Package Link**        | A human-readable symlink in `store/pkg/<name>/<version>/<platform>` pointing to a store object.                       |
 | **Snapshot**            | A point-in-time capture of complete system state (packages, files, env, services).                                    |
-| **Derivation**          | A description of how to obtain content (fetch from URL, Git, build from source).                                      |
+| **Derivation**          | An immutable description of how to obtain content (fetch from URL, Git, build from source). Derivations don't perform work, they describe it. |
 | **Priority**            | A numeric value (lower = higher precedence) used to resolve conflicts between declarations.                           |
 | **Session Variable**    | Environment variable set in shell session via sourced scripts (lost on shell exit).                                   |
 | **Persistent Variable** | Environment variable written to OS-level config (survives reboot, available to all processes).                        |
@@ -36,6 +36,7 @@ sys.lua is built on these core principles:
 3. **Immutability**: Package contents in the store are immutable. Changes happen by installing new versions, not modifying existing ones.
 4. **Simplicity**: Prebuilt binaries when available, human-readable store layout, straightforward Lua syntax.
 5. **Cross-platform**: First-class support for Linux, macOS, and Windows.
+6. **Composable Primitives**: Build on the smallest possible building blocks. Higher-level abstractions (packages, services) are composed from lower-level primitives (derivations, fetch functions). This enables maximum flexibility and reusability.
 
 ## Crate Structure
 
@@ -93,25 +94,25 @@ CLI-specific dependencies for command parsing, completions, and user interaction
 
 Core logic dependencies for store management, HTTP, Git, hashing, and manifest handling:
 
-| Crate          | Version   | Purpose                                              | Documentation              |
-| -------------- | --------- | ---------------------------------------------------- | -------------------------- |
-| `mlua`         | 0.11      | Lua runtime integration (used for config evaluation) | https://docs.rs/mlua       |
-| `reqwest`      | 0.12      | HTTP client for fetchUrl, GitHub/GitLab releases     | https://docs.rs/reqwest    |
-| `gix`          | 0.75      | Git operations for fetchGit, input cloning           | https://docs.rs/gix        |
-| `sha2`         | 0.10      | SHA-256 hashing for content addressing               | https://docs.rs/sha2       |
-| `hex`          | 0.4       | Hex encoding/decoding for hashes                     | https://docs.rs/hex        |
-| `tar`          | 0.4       | Extract .tar.gz archives from downloads              | https://docs.rs/tar        |
-| `flate2`       | 1.0       | Gzip compression/decompression                       | https://docs.rs/flate2     |
-| `zip`          | 6.0       | Extract .zip archives (Windows releases)             | https://docs.rs/zip        |
-| `walkdir`      | 2.5       | Recursive directory traversal for store GC           | https://docs.rs/walkdir    |
-| `tempfile`     | 3.10      | Temporary directories for downloads, builds          | https://docs.rs/tempfile   |
-| `semver`       | 1.0       | Semantic version parsing and comparison              | https://docs.rs/semver     |
-| `petgraph`     | 0.8       | DAG construction and topological sorting             | https://docs.rs/petgraph   |
-| `rayon`        | 1.10      | Parallel execution of DAG nodes                      | https://docs.rs/rayon      |
-| `toml`         | 0.9       | TOML parsing for lock files (alternative to JSON)    | https://docs.rs/toml       |
-| `sys-lua`      | workspace | Lua integration (internal)                           | -                          |
-| `sys-platform` | workspace | Platform abstractions (internal)                     | -                          |
-| `sys-sops`     | workspace | SOPS integration (internal)                          | -                          |
+| Crate          | Version   | Purpose                                              | Documentation            |
+| -------------- | --------- | ---------------------------------------------------- | ------------------------ |
+| `mlua`         | 0.11      | Lua runtime integration (used for config evaluation) | https://docs.rs/mlua     |
+| `reqwest`      | 0.12      | HTTP client for fetchUrl, GitHub/GitLab releases     | https://docs.rs/reqwest  |
+| `gix`          | 0.75      | Git operations for fetchGit, input cloning           | https://docs.rs/gix      |
+| `sha2`         | 0.10      | SHA-256 hashing for content addressing               | https://docs.rs/sha2     |
+| `hex`          | 0.4       | Hex encoding/decoding for hashes                     | https://docs.rs/hex      |
+| `tar`          | 0.4       | Extract .tar.gz archives from downloads              | https://docs.rs/tar      |
+| `flate2`       | 1.0       | Gzip compression/decompression                       | https://docs.rs/flate2   |
+| `zip`          | 6.0       | Extract .zip archives (Windows releases)             | https://docs.rs/zip      |
+| `walkdir`      | 2.5       | Recursive directory traversal for store GC           | https://docs.rs/walkdir  |
+| `tempfile`     | 3.10      | Temporary directories for downloads, builds          | https://docs.rs/tempfile |
+| `semver`       | 1.0       | Semantic version parsing and comparison              | https://docs.rs/semver   |
+| `petgraph`     | 0.8       | DAG construction and topological sorting             | https://docs.rs/petgraph |
+| `rayon`        | 1.10      | Parallel execution of DAG nodes                      | https://docs.rs/rayon    |
+| `toml`         | 0.9       | TOML parsing for lock files (alternative to JSON)    | https://docs.rs/toml     |
+| `sys-lua`      | workspace | Lua integration (internal)                           | -                        |
+| `sys-platform` | workspace | Platform abstractions (internal)                     | -                        |
+| `sys-sops`     | workspace | SOPS integration (internal)                          | -                        |
 
 ### sys-lua Dependencies
 
@@ -158,6 +159,7 @@ SOPS integration dependencies for encrypted secrets management:
 | `base64` | 0.22    | Base64 encoding for encrypted values | https://docs.rs/base64 | Always enabled     |
 
 **Features:**
+
 - `default` = `["age"]` - Age encryption enabled by default
 
 **Note:** SOPS file format handling is implemented in Rust rather than shelling out to the `sops` binary for better cross-platform support and error handling. Only Age encryption is supported (pure Rust, no system dependencies). GPG support is not included - users needing GPG should use the `sops` CLI directly.
@@ -192,8 +194,8 @@ The command-line interface. Provides commands for applying configs, managing pac
 
 **Commands:**
 
-- `apply [sys.lua]` - Apply a configuration file (declarative - installs and removes)
-- `plan [sys.lua]` - Dry-run showing what changes would be made (no root required)
+- `apply [init.lua]` - Apply a configuration file (declarative - installs and removes)
+- `plan [init.lua]` - Dry-run showing what changes would be made (no root required)
 - `status` - Show current environment status (no root required)
 - `list` - List installed packages
 - `history` - Show snapshot history with details
@@ -256,11 +258,12 @@ Core functionality shared across CLI and agent.
 
 **Modules:**
 
+- `derivation` - Derivation types (FetchUrl, FetchGit, etc.) - the smallest building blocks
 - `manifest` - Manifest data structures and validation
+- `store` - Derivation realization, package installation, garbage collection
 - `priority` - Priority-based conflict resolution (mkDefault, mkForce, etc.)
 - `merge` - Declaration merging for singular and mergeable values
 - `dag` - Execution DAG construction and topological sorting
-- `store` - Package installation, uninstallation, garbage collection
 - `inputs` - Input resolution, lock file management
 - `snapshot` - State tracking, rollback support
 - `plan` - Diff computation between manifest and current state
@@ -279,7 +282,7 @@ Lua integration using `mlua` crate.
 
 **Responsibilities:**
 
-- Parse user config files (`sys.lua`)
+- Parse user config files (`init.lua`)
 - Parse registry package definitions (`registry/*.lua`)
 - Provide Lua APIs at multiple abstraction levels
 - Evaluate configuration and produce a declarative manifest
@@ -298,54 +301,54 @@ The Lua API is structured in layers, from low-level primitives to high-level abs
 └─────────────────────────────────────────────┘
 ```
 
-**Global Fetch Helpers (`sys.lib`):**
+**Global Fetch Helpers (`syslua.lib`):**
 
 **Global API:**
 
-sys.lua provides a minimal global API. System information is available via the `sys` global table:
+sys.lua provides a minimal global API. System information is available via the `syslua` global table:
 
 ```lua
 -- System information
-sys.platform       -- "aarch64-darwin"
-sys.os             -- "darwin" | "linux" | "windows"
-sys.arch           -- "aarch64" | "x86_64" | "arm"
-sys.hostname       -- "macbook-pro"
-sys.username       -- "ian"
+syslua.platform       -- "aarch64-darwin"
+syslua.os             -- "darwin" | "linux" | "windows"
+syslua.arch           -- "aarch64" | "x86_64" | "arm"
+syslua.hostname       -- "macbook-pro"
+syslua.username       -- "ian"
 
 -- Boolean helpers for common checks
-sys.is_linux       -- true if Linux
-sys.is_darwin      -- true if macOS
-sys.is_windows     -- true if Windows
+syslua.is_linux       -- true if Linux
+syslua.is_darwin      -- true if macOS
+syslua.is_windows     -- true if Windows
 ```
 
-**Fetch helpers** are available via the `lib` module:
+**Fetch helpers** are available via the `lib` module and return **derivation objects**:
 
 ```lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
--- Fetch from a URL with hash verification
-lib.fetchUrl {
+-- Fetch from a URL with hash verification (returns Derivation)
+local src = lib.fetchUrl {
     url = "https://example.com/tool-1.0.tar.gz",
     sha256 = "abc123...",
 }
 
--- Fetch source code from a Git repository
-lib.fetchGit {
+-- Fetch source code from a Git repository (returns Derivation)
+local src = lib.fetchGit {
     url = "https://github.com/user/repo",
     rev = "v1.0.0",  -- tag, branch, or commit
     sha256 = "def456...",
 }
 
--- Fetch source code from GitHub (convenience wrapper for fetchGit)
-lib.fetchFromGitHub {
+-- Fetch source code from GitHub (convenience wrapper, returns Derivation)
+local src = lib.fetchFromGitHub {
     owner = "BurntSushi",
     repo = "ripgrep",
-    rev = "15.1.0",  -- tag, branch, or commit
+    rev = "15.1.0",
     sha256 = "...",
 }
 
--- Fetch source code from GitLab (convenience wrapper for fetchGit)
-lib.fetchFromGitLab {
+-- Fetch source code from GitLab (convenience wrapper, returns Derivation)
+local src = lib.fetchFromGitLab {
     owner = "user",
     repo = "project",
     rev = "v1.0.0",
@@ -356,13 +359,154 @@ lib.fetchFromGitLab {
 lib.toJSON(table)  -- Returns JSON string
 ```
 
-**Derivations:**
+## Derivation Architecture
+
+**Derivations are the fundamental building block of sys.lua.** They are immutable descriptions of how to obtain content, inspired by Nix.
+
+### Key Principles
+
+1. **Derivations describe, they don't execute**: A derivation is data, not code. It describes what to fetch/build, not how to do it.
+2. **Derivations are composable**: They can be passed around, stored, and combined to create higher-level abstractions.
+3. **Derivations are the smallest primitive**: Packages are built on derivations, not the other way around.
+
+### Derivation Flow
+
+```
+┌─────────────────┐
+│  lib.fetchUrl   │  ← Lua helper function
+└────────┬────────┘
+         │ returns
+         ▼
+┌─────────────────┐
+│   Derivation    │  ← Immutable description (data)
+│   (FetchUrl)    │
+└────────┬────────┘
+         │ passed to
+         ▼
+┌─────────────────┐
+│    Package      │  ← Higher-level abstraction
+│  { src = drv }  │
+└────────┬────────┘
+         │ installed by
+         ▼
+┌─────────────────┐
+│     Store       │  ← Realizes derivation (executes)
+│ .realize_drv()  │
+└────────┬────────┘
+         │ produces
+         ▼
+┌─────────────────┐
+│   StorePath     │  ← Content-addressed result
+│  /store/obj/... │
+└─────────────────┘
+```
+
+### Derivation Types
+
+**Rust implementation:**
+
+```rust
+// Derivation is an enum of fetch/build strategies
+pub enum Derivation {
+    FetchUrl(FetchUrl),   // Download from URL
+    FetchGit(FetchGit),   // Clone from Git
+    Build(Build),         // Build from source (future)
+}
+
+pub struct FetchUrl {
+    pub url: String,
+    pub sha256: String,
+    pub headers: Option<HashMap<String, String>>,
+}
+
+pub struct FetchGit {
+    pub url: String,
+    pub rev: String,
+    pub sha256: String,
+    pub shallow: bool,
+    pub fetch_submodules: bool,
+}
+```
+
+### Why This Matters
+
+This architecture enables powerful composition patterns:
+
+**Example 1: Package from prebuilt binary**
+```lua
+pkg "ripgrep" {
+    version = "15.1.0",
+    src = lib.fetchUrl {  -- Derivation describes the fetch
+        url = "https://github.com/.../ripgrep.tar.gz",
+        sha256 = "...",
+    },
+    bin = { "rg" },
+}
+```
+
+**Example 2: Package from source**
+```lua
+pkg "ripgrep" {
+    version = "15.1.0",
+    src = lib.fetchFromGitHub {  -- Derivation describes the source
+        owner = "BurntSushi",
+        repo = "ripgrep",
+        rev = "15.1.0",
+        sha256 = "...",
+    },
+    build = function(src)  -- Build derivation composed on top
+        return {
+            buildInputs = { "rust" },
+            buildPhase = "cargo build --release",
+            installPhase = "cp target/release/rg $out/bin/",
+        }
+    end,
+}
+```
+
+**Example 3: Patched package (future)**
+```lua
+pkg "ripgrep-custom" {
+    version = "15.1.0",
+    src = lib.applyPatches {  -- Compose derivations
+        src = lib.fetchFromGitHub { ... },
+        patches = [
+            ./my-custom.patch,
+        ],
+    },
+    build = function(src) ... end,
+}
+```
+
+**Example 4: Mirror fallback (future)**
+```lua
+pkg "tool" {
+    version = "1.0.0",
+    src = lib.fetchUrlWithMirrors {  -- Derivation with fallbacks
+        urls = [
+            "https://primary.com/tool.tar.gz",
+            "https://mirror1.com/tool.tar.gz",
+            "https://mirror2.com/tool.tar.gz",
+        ],
+        sha256 = "...",
+    },
+}
+```
+
+### Benefits of Derivation-First Design
+
+1. **Enables build-from-source**: The same `src` field works for prebuilt binaries and source builds
+2. **Composability**: Derivations can be wrapped, modified, and combined
+3. **Testability**: Derivations are data, easy to inspect and test
+4. **Caching**: Derivation hash uniquely identifies content, enabling aggressive caching
+5. **Reproducibility**: Same derivation always produces same content
+6. **Future-proof**: Easy to add new derivation types (fetchFromGitHub, applyPatches, etc.)
 
 Fetch helpers return derivation objects that describe how to obtain content. These are composed to build packages:
 
 ```lua
 -- pkgs/ripgrep.lua - Example 1: Prebuilt binaries from GitHub releases
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 local hashes = {
     ["x86_64-linux"] = "abc123...",
@@ -373,8 +517,8 @@ local hashes = {
 pkg "ripgrep" {
     version = "15.1.0",
     src = lib.fetchUrl {
-        url = "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-" .. sys.platform .. ".tar.gz",
-        sha256 = hashes[sys.platform],
+        url = "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-" .. syslua.platform .. ".tar.gz",
+        sha256 = hashes[syslua.platform],
     },
     bin = { "rg" },
 }
@@ -407,7 +551,7 @@ pkg "ripgrep" {
 When `sha256` is a table keyed by platform, sys.lua looks up the current platform's hash at **evaluation time**. If the platform is not found, evaluation fails immediately with a clear error:
 
 ```lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 local hashes = {
     ["x86_64-linux"] = "abc123...",
@@ -418,15 +562,15 @@ local hashes = {
 pkg "ripgrep" {
     version = "15.1.0",
     src = lib.fetchUrl {
-        url = "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-" .. sys.platform .. ".tar.gz",
-        sha256 = hashes[sys.platform],  -- Error if platform not in table
+        url = "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-" .. syslua.platform .. ".tar.gz",
+        sha256 = hashes[syslua.platform],  -- Error if platform not in table
     },
     bin = { "rg" },
 }
 ```
 
 ```
-$ sys apply sys.lua
+$ sys apply init.lua
 Error: No sha256 hash for platform 'x86_64-darwin' in package 'ripgrep@15.1.0'
   Available platforms: x86_64-linux, aarch64-darwin
 
@@ -442,12 +586,12 @@ Error: No sha256 hash for platform 'x86_64-darwin' in package 'ripgrep@15.1.0'
 
 ```lua
 -- Option 3: Platform conditionals (native Lua)
-if sys.platform ~= "x86_64-darwin" then
+if syslua.platform ~= "x86_64-darwin" then
     pkg "ripgrep" { ... }
 end
 
--- Or using sys.os
-if sys.is_linux then
+-- Or using syslua.os
+if syslua.is_linux then
     pkg "xclip" { ... }
 end
 ```
@@ -509,12 +653,12 @@ lib.fetchGit {
 To download prebuilt binaries or release archives, use `fetchUrl` directly:
 
 ```lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 -- Download release asset
 lib.fetchUrl {
-    url = "https://github.com/owner/repo/releases/download/v1.0.0/binary-" .. sys.platform .. ".tar.gz",
-    sha256 = hashes[sys.platform],
+    url = "https://github.com/owner/repo/releases/download/v1.0.0/binary-" .. syslua.platform .. ".tar.gz",
+    sha256 = hashes[syslua.platform],
 }
 ```
 
@@ -541,6 +685,599 @@ lib.fetchGit {
 3. Remove `.git` directory (makes it a plain directory)
 4. Compute content hash of result
 5. If hash matches, move to store; otherwise error
+
+### Lua Language Server (LuaLS) Integration
+
+To provide excellent IDE/editor support when writing sys.lua configs, we integrate with the Lua Language Server (LuaLS) through type definition files and workspace configuration.
+
+**Goals:**
+
+- Autocomplete for global functions (`pkg`, `file`, `env`, `user`, `service`, `input`, etc.)
+- Type checking for all API parameters
+- Hover documentation for functions and options
+- Go-to-definition for modules and package references
+- Diagnostics for invalid configurations
+- Zero configuration required - works out of the box
+
+**Implementation Strategy:**
+
+sys.lua provides type definitions in three ways:
+
+1. **Bundled type definitions** (`.luarc.json` + type stubs)
+2. **Runtime injection** (automatic workspace configuration)
+3. **Package annotations** (shipped with sys.lua CLI)
+
+#### Type Definition Files
+
+sys.lua ships with comprehensive type definitions in `lib/types/` that are automatically loaded by LuaLS:
+
+```
+syslua-2/
+├── lib/
+│   ├── types/
+│   │   ├── syslua.d.lua         # Global syslua table
+│   │   ├── syslua.lib.d.lua     # syslua.lib module
+│   │   ├── globals.d.lua        # pkg(), file{}, env{}, etc.
+│   │   ├── inputs.d.lua         # input() function
+│   │   ├── modules.d.lua        # Module system types
+│   │   └── sops.d.lua           # SOPS integration
+│   └── init.lua                 # Actual runtime implementations
+```
+
+**Example: `lib/types/syslua.d.lua`**
+
+```lua
+---@meta
+
+---@class Syslua
+---@field platform string Platform identifier (e.g., "x86_64-linux", "aarch64-darwin")
+---@field os "linux"|"darwin"|"windows" Operating system
+---@field arch "x86_64"|"aarch64"|"arm" CPU architecture
+---@field hostname string Machine hostname
+---@field username string Current user
+---@field is_linux boolean True if running on Linux
+---@field is_darwin boolean True if running on macOS
+---@field is_windows boolean True if running on Windows
+---@field version string sys.lua version (e.g., "0.1.0")
+
+---Global syslua system information
+---@type Syslua
+syslua = {}
+```
+
+**Example: `lib/types/globals.d.lua`**
+
+```lua
+---@meta
+
+---@class PackageSpec
+---@field version string Package version
+---@field src Derivation Source derivation
+---@field bin? string[] List of binary names to add to PATH
+---@field build? fun(src: string, opts: table): BuildSpec Build function for source builds
+---@field config? fun(opts: table) Runtime configuration function
+---@field options? table Configurable options for this package
+---@field hooks? table Lifecycle hooks
+
+---@class Derivation
+---@field url? string URL to fetch from
+---@field sha256 string|table<string, string> Content hash or platform-keyed hashes
+---@field rev? string Git revision (tag, branch, or commit)
+---@field owner? string GitHub/GitLab owner
+---@field repo? string GitHub/GitLab repository
+
+---Install a package from an input or define a custom package
+---@overload fun(package_ref: table): nil
+---@overload fun(package_ref: table, version: string): nil
+---@overload fun(name: string): fun(spec: PackageSpec): nil
+function pkg(name_or_ref, version) end
+
+---@class FileSpec
+---@field path string File path (~ expanded for user files)
+---@field content? string Inline file content
+---@field symlink? string Create symbolic link to target
+---@field copy? string Copy file from source
+---@field mode? integer Unix file permissions (e.g., 0o755)
+---@field depends_on? string[] Package dependencies
+
+---Declare a file to be managed by sys.lua
+---@param spec FileSpec
+function file(spec) end
+
+---@alias EnvValue string|string[]|table
+
+---Declare environment variables (session-scoped)
+---@param vars table<string, EnvValue>
+function env(vars) end
+
+---Declare persistent environment variables (system-wide)
+---@type fun(vars: table<string, EnvValue>)
+env.persistent = function(vars) end
+
+---@class UserSpec
+---@field name string Username
+---@field config fun() User configuration function
+
+---Declare per-user configuration
+---@param spec UserSpec
+function user(spec) end
+
+---@class ServiceSpec
+---@field enable boolean Enable the service
+---@field rootless? boolean Run service in rootless mode (Docker)
+---@field port? integer Service port number
+---@field config? fun() Service-specific configuration
+
+---Declare a system service
+---@param name string Service name
+---@return fun(spec: ServiceSpec)
+function service(name) end
+
+---@class ProjectSpec
+---@field name string Project name
+---@field config fun() Project configuration function
+
+---Declare a project-scoped environment
+---@param spec ProjectSpec
+function project(spec) end
+```
+
+**Example: `lib/types/syslua.lib.d.lua`**
+
+```lua
+---@meta
+
+---@class SysluaLib
+local lib = {}
+
+---@class FetchUrlSpec
+---@field url string URL to fetch from
+---@field sha256 string|table<string, string> Content hash or platform-keyed hashes
+---@field headers? table<string, string> HTTP headers for authentication
+---@field followRedirects? boolean Follow redirects (default: true)
+---@field timeout? integer Timeout in seconds (default: 300)
+
+---Fetch a file from a URL with hash verification
+---@param spec FetchUrlSpec
+---@return Derivation
+function lib.fetchUrl(spec) end
+
+---@class FetchGitSpec
+---@field url string Git repository URL
+---@field rev string Git revision (tag, branch, or commit SHA)
+---@field sha256 string Content hash
+---@field shallow? boolean Shallow clone (default: true for tags/commits)
+---@field fetchSubmodules? boolean Fetch git submodules (default: false)
+
+---Fetch source code from a Git repository
+---@param spec FetchGitSpec
+---@return Derivation
+function lib.fetchGit(spec) end
+
+---@class FetchGitHubSpec
+---@field owner string GitHub repository owner
+---@field repo string GitHub repository name
+---@field rev string Git revision (tag, branch, or commit)
+---@field sha256 string Content hash
+
+---Fetch source code from GitHub (convenience wrapper)
+---@param spec FetchGitHubSpec
+---@return Derivation
+function lib.fetchFromGitHub(spec) end
+
+---@class FetchGitLabSpec
+---@field owner string GitLab repository owner
+---@field repo string GitLab repository name
+---@field rev string Git revision (tag, branch, or commit)
+---@field sha256 string Content hash
+
+---Fetch source code from GitLab (convenience wrapper)
+---@param spec FetchGitLabSpec
+---@return Derivation
+function lib.fetchFromGitLab(spec) end
+
+---Convert a Lua table to JSON string
+---@param value table
+---@return string
+function lib.toJSON(value) end
+
+---Set default priority (1000) - can be overridden
+---@generic T
+---@param value T
+---@return T
+function lib.mkDefault(value) end
+
+---Set highest priority (50) - forces value
+---@generic T
+---@param value T
+---@return T
+function lib.mkForce(value) end
+
+---Prepend to mergeable values (priority 500)
+---@generic T
+---@param value T
+---@return T
+function lib.mkBefore(value) end
+
+---Append to mergeable values (priority 1500)
+---@generic T
+---@param value T
+---@return T
+function lib.mkAfter(value) end
+
+---Set explicit priority for conflict resolution
+---@generic T
+---@param priority integer
+---@param value T
+---@return T
+function lib.mkOverride(priority, value) end
+
+---Alias for mkOverride (clearer for ordered lists)
+---@generic T
+---@param priority integer
+---@param value T
+---@return T
+function lib.mkOrder(priority, value) end
+
+---Mark environment variable as mergeable (like PATH)
+---@param var_name string
+function lib.env.defineMergeable(var_name) end
+
+---Mark environment variable as singular (only one value)
+---@param var_name string
+function lib.env.defineSingular(var_name) end
+
+return lib
+```
+
+**Example: `lib/types/inputs.d.lua`**
+
+```lua
+---@meta
+
+---@class InputSpec
+---@field rev? string Pinned revision (commit hash)
+---@field branch? string Branch name to track
+---@field auth? string Authentication token (from SOPS)
+
+---@class Input
+---@field [string] table Package definitions from this input
+
+---Declare an input source (GitHub, GitLab, Git, or local path)
+---@param url string Input URL (e.g., "github:sys-lua/pkgs", "path:./my-packages")
+---@return fun(spec?: InputSpec): Input
+function input(url) end
+```
+
+**Example: `lib/types/sops.d.lua`**
+
+```lua
+---@meta
+
+---@class Sops
+local sops = {}
+
+---Load and decrypt a SOPS-encrypted secrets file
+---@param path string Path to encrypted YAML file
+---@return table Decrypted secrets
+function sops.load(path) end
+
+---Set a secret value (encrypts and writes to file)
+---@param key string Secret key
+---@param value string Secret value
+function sops.set(key, value) end
+
+---Rotate encryption keys for all secrets
+function sops.rotate() end
+
+---Global SOPS integration
+---@type Sops
+sops = {}
+```
+
+#### Workspace Configuration
+
+sys.lua automatically generates a `.luarc.json` file when you run `sys apply` in a directory with a `sys.lua` config. This file tells LuaLS where to find type definitions:
+
+```json
+{
+  "runtime": {
+    "version": "Lua 5.4"
+  },
+  "workspace": {
+    "library": [
+      "/syslua/store/pkg/syslua/0.1.0/share/lua/types",
+      "~/.local/share/syslua/types"
+    ],
+    "checkThirdParty": false
+  },
+  "diagnostics": {
+    "globals": [
+      "syslua",
+      "pkg",
+      "file",
+      "env",
+      "user",
+      "service",
+      "project",
+      "input",
+      "sops"
+    ]
+  },
+  "completion": {
+    "callSnippet": "Both",
+    "keywordSnippet": "Both"
+  }
+}
+```
+
+**Automatic generation algorithm:**
+
+```
+GENERATE_LUARC_JSON(config_dir):
+    luarc_path = config_dir + "/.luarc.json"
+
+    // Skip if user has custom .luarc.json
+    IF EXISTS(luarc_path):
+        WARN "Using existing .luarc.json"
+        RETURN
+
+    // Find sys.lua installation
+    syslua_types_dir = FIND_TYPES_DIR()
+
+    config = {
+        runtime: { version: "Lua 5.4" },
+        workspace: {
+            library: [
+                syslua_types_dir,
+                "~/.local/share/syslua/types"  // For user-defined types
+            ],
+            checkThirdParty: false
+        },
+        diagnostics: {
+            globals: ["syslua", "pkg", "file", "env", "user", "service", "project", "input", "sops"]
+        },
+        completion: {
+            callSnippet: "Both",
+            keywordSnippet: "Both"
+        }
+    }
+
+    WRITE_JSON(luarc_path, config)
+    LOG "Generated .luarc.json for LuaLS integration"
+
+FIND_TYPES_DIR():
+    // Try system store first
+    IF EXISTS("/syslua/store/pkg/syslua/*/share/lua/types"):
+        RETURN first_match
+
+    // Try user store
+    IF EXISTS("~/.local/share/syslua/store/pkg/syslua/*/share/lua/types"):
+        RETURN first_match
+
+    // Fall back to development location
+    RETURN SYSLUA_REPO + "/lib/types"
+```
+
+#### Package Annotations
+
+Registry packages should include type annotations for their options:
+
+```lua
+-- pkgs/neovim.lua
+
+---@class NeovimOptions
+---@field withPython boolean Enable Python provider (default: false)
+---@field withNodejs boolean Enable Node.js provider (default: false)
+---@field withClipboard boolean Enable system clipboard integration (default: true)
+---@field extraConfig? string Additional Neovim configuration
+
+pkg "neovim" {
+    version = "0.10.0",
+    src = lib.fetchFromGitHub { ... },
+    bin = { "nvim" },
+
+    options = {
+        withPython = false,
+        withNodejs = false,
+        withClipboard = true,
+    },
+
+    ---@param opts NeovimOptions
+    config = function(opts)
+        if opts.withPython then
+            pkg("python3")
+            pkg("pynvim")
+        end
+
+        if opts.withNodejs then
+            pkg("nodejs")
+            pkg("neovim-node-client")
+        end
+
+        if opts.withClipboard and syslua.is_linux then
+            pkg("xclip")
+        end
+    end,
+}
+```
+
+When users reference this package, they get full autocomplete and type checking:
+
+```lua
+-- sys.lua (user config)
+local inputs = {
+    pkgs = input "github:sys-lua/pkgs"
+}
+
+-- LuaLS provides autocomplete for neovim options
+pkg(inputs.pkgs.neovim, {
+    withPython = true,   -- ✓ Autocomplete suggests this field
+    withNodejs = false,  -- ✓ Type checking ensures boolean
+    -- withFoo = true    -- ✗ Error: unknown field 'withFoo'
+})
+```
+
+#### Module Annotations
+
+User-defined modules should follow the same annotation pattern:
+
+```lua
+-- modules/docker.lua
+
+---@class DockerOptions
+---@field enable boolean Enable Docker (default: false)
+---@field rootless boolean Run Docker in rootless mode (default: true)
+---@field storageDriver "overlay2"|"btrfs"|"zfs" Docker storage driver (default: "overlay2")
+
+---Docker module for container management
+---@type { options: DockerOptions, config: fun(opts: DockerOptions) }
+local M = {
+    options = {
+        enable = false,
+        rootless = true,
+        storageDriver = "overlay2",
+    },
+}
+
+---Configure Docker based on options
+---@param opts DockerOptions
+function M.config(opts)
+    if not opts.enable then return end
+
+    pkg("docker")
+    pkg("docker-compose")
+
+    if syslua.os == "linux" then
+        service "docker" {
+            enable = true,
+            rootless = opts.rootless,
+        }
+    end
+end
+
+return M
+```
+
+#### User Experience Flow
+
+1. **User creates configuration**
+
+   ```bash
+   $ mkdir -p ~/.config/syslua
+   $ nvim ~/.config/syslua/init.lua  # or any editor with LuaLS
+   ```
+
+2. **On first `sys apply`, sys.lua generates `.luarc.json`**
+
+   ```bash
+   $ sys apply ~/.config/syslua/
+   Generated .luarc.json for Lua Language Server integration
+   ```
+
+3. **Editor automatically loads type definitions**
+   - LuaLS reads `.luarc.json`
+   - Loads type definitions from sys.lua installation
+   - Provides autocomplete, hover docs, and diagnostics
+
+4. **User gets full IDE support**
+   - Typing `pkg(` shows parameter hints
+   - Typing `syslua.` shows available properties with documentation
+   - Typing `lib.` shows available functions
+   - Invalid configurations show red squiggles
+
+#### Editor Setup Guides
+
+**VS Code:**
+
+```bash
+# Install Lua Language Server extension
+code --install-extension sumneko.lua
+
+# sys.lua automatically generates .luarc.json on first apply
+sys apply ~/.config/syslua/
+```
+
+**Neovim (with nvim-lspconfig):**
+
+```lua
+-- ~/.config/nvim/init.lua
+require('lspconfig').lua_ls.setup({
+  -- LuaLS will automatically read .luarc.json
+  on_attach = function(client, bufnr)
+    -- Your LSP keymaps here
+  end,
+})
+```
+
+**Emacs (with lsp-mode):**
+
+```elisp
+;; LuaLS will automatically read .luarc.json
+(use-package lsp-mode
+  :hook ((lua-mode . lsp)))
+```
+
+**CLI Command:**
+
+```bash
+# Generate .luarc.json without applying config
+$ sys init
+Generated .luarc.json for Lua Language Server integration
+Generated sys.lua template
+
+# Force regenerate .luarc.json
+$ sys init --force
+Regenerated .luarc.json
+```
+
+#### Runtime Type Checking
+
+In addition to LSP-based type checking, sys.lua performs runtime validation during config evaluation:
+
+```lua
+-- Invalid config example
+pkg("neovim", {
+    version = 123,  -- ✗ Runtime error: version must be string
+})
+
+env {
+    EDITOR = { "nvim" },  -- ✗ Runtime error: singular env var must be string
+}
+
+file {
+    path = "~/.gitconfig",
+    content = "...",
+    symlink = "...",  -- ✗ Runtime error: cannot specify both content and symlink
+}
+```
+
+Error messages include:
+
+- Field name and type mismatch
+- Expected vs actual type
+- Line number in config file (when available)
+- Suggestion for fixing the error
+
+**Example error output:**
+
+```
+Error evaluating sys.lua:
+  Line 15: Invalid value for 'pkg.version'
+    Expected: string
+    Got: number (123)
+
+  Suggestion: pkg("neovim", { version = "0.10.0" })
+```
+
+#### Benefits
+
+1. **Zero-configuration DX**: Works out of the box after first `sys apply`
+2. **IDE-agnostic**: Any editor with LuaLS support gets full integration
+3. **Type safety**: Catch errors before applying config
+4. **Documentation**: Hover tooltips show function/option descriptions
+5. **Discoverability**: Autocomplete reveals all available APIs
+6. **Consistency**: Same annotations in registry packages and user modules
 
 ### sys-platform
 
@@ -571,11 +1308,11 @@ sys.lua uses a multi-level store architecture:
 
 **User Store (managed by each user, no sudo required):**
 
-| Platform | User Store Path |
-| -------- | --------------- |
-| Linux    | `~/.local/share/sys/store` |
-| macOS    | `~/Library/Application Support/sys/store` |
-| Windows  | `%LOCALAPPDATA%\sys\store` |
+| Platform | User Store Path                              |
+| -------- | -------------------------------------------- |
+| Linux    | `~/.local/share/syslua/store`                |
+| macOS    | `~/Library/Application Support/syslua/store` |
+| Windows  | `%LOCALAPPDATA%\syslua\store`                |
 
 ### System Store Layout
 
@@ -597,7 +1334,7 @@ sys.lua uses a multi-level store architecture:
 ### User Store Layout
 
 ```
-~/.local/share/sys/
+~/.local/share/syslua/
 ├── store/
 │   ├── obj/<sha256>/       # User's packages (or hardlinks to system store)
 │   ├── pkg/<name>/<ver>/   # User's package symlinks
@@ -610,7 +1347,7 @@ sys.lua uses a multi-level store architecture:
 ├── env.fish                # Generated environment script (fish)
 ├── env.ps1                 # Generated environment script (PowerShell)
 └── config/
-    └── sys.lua             # User's configuration (optional default location)
+    └── init.lua            # User's configuration (optional default location)
 ```
 
 **Benefits of Multi-Level Store:**
@@ -627,18 +1364,19 @@ When a user installs a package that exists in the system store:
 
 ```bash
 # System admin installs git
-sudo sys apply /etc/sys/system.lua
+sudo sys apply /etc/syslua/init.lua
   → Installs to: /syslua/store/obj/abc123.../
 
 # User wants git in their config
-sys apply ~/.config/sys/sys.lua
+sys apply ~/.config/syslua/init.lua
   → Checks: Does /syslua/store/obj/abc123.../ exist?
   → If same filesystem: Creates hardlink
-    ~/.local/share/sys/store/pkg/git/2.40.0/ → /syslua/store/obj/abc123.../
+    ~/.local/share/syslua/store/pkg/git/2.40.0/ → /syslua/store/obj/abc123.../
   → If different filesystem: Just reference via PATH
 ```
 
 **Hardlink deduplication:**
+
 - Zero additional disk space for duplicate packages
 - Both stores point to same inode
 - Works if user store and system store are on same filesystem
@@ -649,12 +1387,14 @@ sys apply ~/.config/sys/sys.lua
 Objects in `obj/<hash>/` are made immutable after extraction:
 
 **System store objects:**
+
 - **Linux:** `chattr +i` (requires root to modify)
 - **macOS:** `chflags uchg` (requires root to modify)
 - **Windows:** ACL restrictions (requires admin to modify)
 - **World-readable:** `chmod 755` (directories), `chmod 644` (files)
 
 **User store objects:**
+
 - **Same immutability flags** (user owns them, but makes immutable)
 - **Purpose:** Prevent accidental modification
 - **Removal:** User can run `sys gc` to remove (clears immutability first)
@@ -669,7 +1409,7 @@ Instead of a separate registry sync mechanism, sys.lua uses declarative inputs d
 
 ```lua
 -- sys.lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 local secrets = sops.load("./secrets.yaml")  -- For private input auth
 
 local inputs = {
@@ -776,10 +1516,11 @@ pkg(inputs.pkgs.nodejs, "18.20.0")
 
 ### Lock File
 
-sys.lua generates a `sys.lock` file **alongside each `sys.lua` config**. This enables:
+sys.lua generates a `syslua.lock` file in the same directory as the configuration. This enables:
 
-- **System configs**: `~/sys.lua` → `~/sys.lock`
-- **Project configs**: `./sys.lua` → `./sys.lock` (committed to version control)
+- **System configs**: `/etc/syslua/` → `/etc/syslua/syslua.lock`
+- **User configs**: `~/.config/syslua/` → `~/.config/syslua/syslua.lock`
+- **Project configs**: `./` → `./syslua.lock` (committed to version control)
 
 Lock files pin all inputs to exact revisions for reproducibility:
 
@@ -810,18 +1551,18 @@ Lock files pin all inputs to exact revisions for reproducibility:
 
 **Lock file behavior:**
 
-| Scenario           | Behavior                             |
-| ------------------ | ------------------------------------ |
-| `sys.lock` exists  | Use pinned revisions from lock file  |
-| `sys.lock` missing | Resolve latest, create lock file     |
-| `sys update`       | Update lock file to latest revisions |
-| Lock file mismatch | Error (prevents accidental updates)  |
+| Scenario              | Behavior                                 |
+| --------------------- | ---------------------------------------- |
+| `syslua.lock` exists  | Use pinned revisions from lock file      |
+| `syslua.lock` missing | Resolve latest, create lock file         |
+| `sys update`          | Re-resolve specified inputs, update lock |
+| `sys update --commit` | Update lock and `git commit` it          |
 
 **Team workflow:**
 
 ```bash
 # Developer A: Add new input, commit lock file
-git add sys.lua sys.lock
+git add init.lua syslua.lock
 git commit -m "Add nodejs to project"
 
 # Developer B: Pull and apply (uses same pinned versions)
@@ -886,7 +1627,7 @@ local inputs = {
 
 - Never commit plaintext tokens to `sys.lua`
 - Use SOPS to encrypt credentials in `secrets.yaml`
-- The `auth` field is never written to `sys.lock`
+- The `auth` field is never written to `syslua.lock`
 
 ### Input Resolution Algorithm
 
@@ -952,7 +1693,7 @@ RESOLVE_LATEST(input_decl):
 
 FETCH_INPUT(input_decl, rev):
     cache_key = HASH(input_decl.url + rev)
-    cache_path = "~/.cache/sys/inputs/{cache_key}"
+    cache_path = "~/.cache/syslua/inputs/{cache_key}"
 
     IF cache_path EXISTS:
         RETURN cache_path
@@ -1012,7 +1753,7 @@ Users can define custom packages directly in their `sys.lua` using the same prim
 - Tools from private repositories
 
 ```lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 -- Custom package from GitHub release (prebuilt binaries)
 local hashes = {
@@ -1023,8 +1764,8 @@ local hashes = {
 pkg "my-internal-tool" {
     version = "2.1.0",
     src = lib.fetchUrl {
-        url = "https://github.com/mycompany/internal-tool/releases/download/v2.1.0/internal-tool-2.1.0-" .. sys.platform .. ".tar.gz",
-        sha256 = hashes[sys.platform],
+        url = "https://github.com/mycompany/internal-tool/releases/download/v2.1.0/internal-tool-2.1.0-" .. syslua.platform .. ".tar.gz",
+        sha256 = hashes[syslua.platform],
     },
     bin = { "internal-tool" },
 }
@@ -1089,7 +1830,7 @@ Packages can declare configurable options that users can set when installing the
 
 ---@class NeovimOptions
 ---@field withPython boolean Enable Python provider
----@field withNodejs boolean Enable Node.js provider  
+---@field withNodejs boolean Enable Node.js provider
 ---@field withClipboard boolean Enable system clipboard integration
 
 pkg "neovim" {
@@ -1118,7 +1859,7 @@ pkg "neovim" {
             pkg("neovim-node-client")
         end
 
-        if opts.withClipboard and sys.is_linux then
+        if opts.withClipboard and syslua.is_linux then
             pkg("xclip")
         end
 
@@ -1153,6 +1894,7 @@ pkg(nvim)
 **Type safety:**
 
 Using `---@class` and `---@field` annotations provides:
+
 - IDE autocomplete for option names
 - Type checking in editors with Lua Language Server
 - Documentation in hover tooltips
@@ -1236,22 +1978,22 @@ impl LuaModule {
         // Hook into Lua's require() to track loaded modules
         let modules_table = lua.create_table()?;
         lua.globals().set("__sys_modules", modules_table)?;
-        
+
         // Override require() to track module loads
         lua.load(r#"
             local original_require = require
             function require(name)
                 local module = original_require(name)
-                
+
                 -- If module has options and config, track it
                 if type(module) == "table" and module.options and module.config then
                     __sys_modules[name] = module
                 end
-                
+
                 return module
             end
         "#).exec()?;
-        
+
         Ok(())
     }
 }
@@ -1357,7 +2099,7 @@ Modules are **plain Lua modules** that return a table with `options` and a `conf
 
 ```lua
 -- modules/docker.lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 ---@class DockerOptions
 ---@field enable boolean Enable Docker
@@ -1382,7 +2124,7 @@ function M.config(opts)
     pkg("docker")
     pkg("docker-compose")
 
-    if sys.os == "linux" then
+    if syslua.os == "linux" then
         service "docker" {
             enable = true,
             rootless = opts.rootless,
@@ -1532,10 +2274,352 @@ pkg "neovim" {
 
 ## Configuration API
 
-### User Config (`sys.lua`)
+### Configuration File Structure
+
+sys.lua configurations can be structured as either:
+
+1. **Directory with `init.lua`** - Best for complex, multi-file configs
+2. **Single `.lua` file** - Best for simple configs
+
+Both approaches support modular configuration via `require()` and use a standard `syslua.lock` file for dependency pinning.
+
+#### Directory-Based Configuration
+
+A directory containing `init.lua` can be applied directly:
+
+```bash
+$ sys apply ~/.config/syslua/
+```
+
+**Simple structure:**
+
+```
+~/.config/syslua/
+├── init.lua              # Entry point (required)
+└── syslua.lock           # Lock file (auto-generated)
+```
+
+**Complex structure:**
+
+```
+~/.config/syslua/
+├── init.lua              # Entry point
+├── syslua.lock           # Lock file
+├── inputs.lua            # Input declarations
+├── packages.lua          # Package declarations
+├── environment.lua       # Environment variables
+├── modules/              # Reusable modules
+│   ├── development.lua
+│   ├── docker.lua
+│   └── postgres.lua
+├── pkgs/                 # Custom package definitions
+│   └── internal-tool.lua
+└── users/                # Per-user configs
+    ├── alice.lua
+    └── bob.lua
+```
+
+**Example: `init.lua`**
 
 ```lua
-local lib = require("sys.lib")
+-- ~/.config/syslua/init.lua
+local inputs = require("inputs")
+
+-- Load package declarations
+require("packages")
+
+-- Load environment config
+require("environment")
+
+-- Load optional modules based on system
+if syslua.is_darwin then
+    require("modules.macos")
+end
+
+if syslua.hostname == "work-laptop" then
+    local dev = require("modules.development")
+    dev.options.enable = true
+end
+
+-- Load user configurations
+require("users.alice")
+```
+
+When applying a directory, sys.lua:
+
+1. Looks for `init.lua` in the directory
+2. Evaluates `init.lua` with the directory as the working directory
+3. Creates `syslua.lock` in the same directory
+
+#### File-Based Configuration
+
+A single `.lua` file can be applied directly:
+
+```bash
+$ sys apply ~/myconfig.lua
+```
+
+**Structure:**
+
+```
+~/
+├── myconfig.lua          # Configuration file
+├── syslua.lock           # Lock file (auto-generated in same directory)
+└── modules/              # Optional: modules can be required relatively
+    └── custom.lua
+```
+
+**Example: `myconfig.lua`**
+
+```lua
+-- ~/myconfig.lua
+local lib = require("syslua.lib")
+
+local inputs = {
+    pkgs = input "github:sys-lua/pkgs"
+}
+
+pkg(inputs.pkgs.ripgrep)
+pkg(inputs.pkgs.neovim)
+
+env {
+    EDITOR = "nvim",
+}
+
+-- Can still require other files relatively
+local custom = require("modules.custom")
+```
+
+When applying a file, sys.lua:
+
+1. Evaluates the specified `.lua` file
+2. Sets working directory to the file's parent directory
+3. Creates `syslua.lock` in the file's parent directory
+
+#### Lock File Location
+
+The lock file is **always named `syslua.lock`** and placed in:
+
+- **Directory target**: Same directory as `init.lua`
+
+  ```bash
+  $ sys apply ~/.config/syslua/
+  # Creates: ~/.config/syslua/syslua.lock
+  ```
+
+- **File target**: Same directory as the `.lua` file
+
+  ```bash
+  $ sys apply ~/myconfig.lua
+  # Creates: ~/syslua.lock
+
+  $ sys apply /etc/syslua/system.lua
+  # Creates: /etc/syslua/syslua.lock
+  ```
+
+- **Current directory**: If applying `./`
+  ```bash
+  $ sys apply ./
+  # Creates: ./syslua.lock
+  ```
+
+This standardization makes lock files easy to find and manage in version control.
+
+#### Configuration Discovery
+
+When you run `sys apply` without arguments, it searches for configuration in these locations (in order):
+
+1. `./` (current directory with `init.lua`)
+2. `~/.config/syslua/` (user config directory)
+3. `/etc/syslua/` (system config directory)
+
+```bash
+# Apply configuration from current directory
+$ sys apply
+# Looks for: ./init.lua → ./syslua.lock
+
+# If not found, tries user config
+# Looks for: ~/.config/syslua/init.lua → ~/.config/syslua/syslua.lock
+
+# If not found, tries system config
+# Looks for: /etc/syslua/init.lua → /etc/syslua/syslua.lock
+```
+
+#### Module Resolution
+
+When you `require()` a module from your config, Lua searches:
+
+1. **Relative to config directory**: `./module.lua`
+2. **Lua standard paths**: `package.path`
+3. **syslua library paths**: `/syslua/store/pkg/syslua/*/share/lua/`
+
+**Example resolution:**
+
+```lua
+-- From ~/.config/syslua/init.lua
+
+-- Relative require (searches ~/.config/syslua/modules/docker.lua)
+local docker = require("modules.docker")
+
+-- Syslua library require (searches syslua install path)
+local lib = require("syslua.lib")
+
+-- Package-path require (searches standard Lua paths)
+local json = require("cjson")
+```
+
+**Directory target (`sys apply ~/.config/syslua/`):**
+
+- Working directory: `~/.config/syslua/`
+- Relative requires work from this directory
+
+**File target (`sys apply ~/myconfig.lua`):**
+
+- Working directory: `~/` (parent of myconfig.lua)
+- Relative requires work from `~/`
+
+#### Common Patterns
+
+**Pattern 1: User configuration (directory-based)**
+
+```bash
+$ mkdir -p ~/.config/syslua
+$ cd ~/.config/syslua
+$ cat > init.lua << 'EOF'
+local lib = require("syslua.lib")
+local inputs = { pkgs = input "github:sys-lua/pkgs" }
+pkg(inputs.pkgs.neovim)
+EOF
+$ sys apply ~/.config/syslua/
+```
+
+**Pattern 2: Simple config (file-based)**
+
+```bash
+$ cat > ~/system.lua << 'EOF'
+local inputs = { pkgs = input "github:sys-lua/pkgs" }
+pkg(inputs.pkgs.git)
+pkg(inputs.pkgs.curl)
+EOF
+$ sudo sys apply ~/system.lua
+```
+
+**Pattern 3: Project-local config (directory-based)**
+
+```bash
+$ cd ~/projects/myapp
+$ mkdir syslua-config
+$ cat > syslua-config/init.lua << 'EOF'
+local inputs = { pkgs = input "github:sys-lua/pkgs" }
+pkg(inputs.pkgs.nodejs, "18.20.0")
+pkg(inputs.pkgs.postgresql)
+EOF
+$ sys apply syslua-config/
+```
+
+**Pattern 4: System-wide config (directory-based)**
+
+```bash
+$ sudo mkdir -p /etc/syslua
+$ sudo cat > /etc/syslua/init.lua << 'EOF'
+local inputs = { pkgs = input "github:sys-lua/pkgs" }
+pkg(inputs.pkgs.git)
+pkg(inputs.pkgs.docker)
+EOF
+$ sudo sys apply /etc/syslua/
+```
+
+#### Target Resolution Algorithm
+
+```
+RESOLVE_CONFIG_TARGET(target):
+    IF target IS NULL:
+        // No target specified, use discovery
+        FOR EACH path IN ["./", "~/.config/syslua/", "/etc/syslua/"]:
+            IF EXISTS(path + "init.lua"):
+                RETURN { type: "directory", path: path, entry: "init.lua" }
+        ERROR "No configuration found. Run 'sys init' to create one."
+
+    IF target IS DIRECTORY:
+        entry_file = target + "/init.lua"
+        IF NOT EXISTS(entry_file):
+            ERROR "Directory '{target}' does not contain init.lua"
+        RETURN {
+            type: "directory",
+            path: target,
+            entry: "init.lua",
+            lock: target + "/syslua.lock",
+            workdir: target
+        }
+
+    IF target IS FILE AND target ENDS WITH ".lua":
+        IF NOT EXISTS(target):
+            ERROR "File '{target}' does not exist"
+        RETURN {
+            type: "file",
+            path: dirname(target),
+            entry: basename(target),
+            lock: dirname(target) + "/syslua.lock",
+            workdir: dirname(target)
+        }
+
+    ERROR "Invalid target. Must be a directory with init.lua or a .lua file"
+
+APPLY_CONFIG(target):
+    config = RESOLVE_CONFIG_TARGET(target)
+
+    // Set working directory for module resolution
+    SET_WORKING_DIR(config.workdir)
+
+    // Add config directory to Lua package.path
+    package.path = config.workdir + "/?.lua;" + config.workdir + "/?/init.lua;" + package.path
+
+    // Load and evaluate config
+    manifest = EVAL_LUA_FILE(config.workdir + "/" + config.entry)
+
+    // Read or create lock file
+    lock_file = READ_OR_CREATE_LOCK(config.lock)
+
+    // Resolve inputs with lock file
+    inputs = RESOLVE_INPUTS(manifest, lock_file)
+
+    // Apply configuration
+    APPLY_MANIFEST(manifest, inputs)
+```
+
+#### Version Control
+
+**Directory-based config:**
+
+```gitignore
+# Commit structure and lock file
+/init.lua
+/packages.lua
+/environment.lua
+/modules/
+/syslua.lock
+
+# Ignore secrets
+/secrets.yaml
+```
+
+**File-based config:**
+
+```gitignore
+# Commit config and lock file
+/myconfig.lua
+/syslua.lock
+
+# Ignore secrets
+/secrets.yaml
+```
+
+The standard `syslua.lock` name makes it easy to add to `.gitignore` patterns or commit it consistently.
+
+### User Config Examples
+
+```lua
+local lib = require("syslua.lib")
 local inputs = { ... }  -- see Inputs section
 
 -- Declare packages from inputs
@@ -1592,7 +2676,7 @@ Environment variables are either singular (one value) or mergeable (combined):
 | Mergeable     | All values combined, sorted by priority     | `PATH`, `MANPATH`, `LD_LIBRARY_PATH` |
 
 ```lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 -- Singular: only one value (uses priority resolution)
 env {
@@ -1669,7 +2753,7 @@ Users can override the classification for custom environment variables:
 
 ```lua
 -- sys.lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 -- Mark custom variable as mergeable
 lib.env.defineMergeable("MY_CUSTOM_PATH")
@@ -1806,7 +2890,7 @@ sys.lua uses a **priority-based system** (inspired by NixOS modules) to resolve 
 | Custom           | `lib.mkOverride(priority, value)` | Explicit priority control                 |
 
 ```lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 -- Explicit priority control
 lib.mkForce(value)              -- Priority 50 (highest precedence)
@@ -2447,7 +3531,7 @@ Snapshots capture the **complete system state** before and after changes, enabli
 ### Structure
 
 ```
-~/.local/share/sys/snapshots/
+~/.local/share/syslua/snapshots/
 ├── metadata.json
 └── files/
     └── <snapshot_id>/      # Backed up file contents
@@ -2513,7 +3597,7 @@ Snapshots capture the **complete system state** before and after changes, enabli
 For files managed by `file {}`, the actual content is backed up:
 
 ```
-~/.local/share/sys/snapshots/files/
+~/.local/share/syslua/snapshots/files/
 └── 1765208363188/
     ├── home-ian-.gitconfig        # Flattened path
     ├── home-ian-.config-nvim      # Directory archived as tarball
@@ -2841,9 +3925,9 @@ GC_COLLECT():
 Snapshots protect their referenced objects from GC:
 
 ```
-$ sys apply sys.lua           # Installs ripgrep@15.1.0 (creates snapshot 1)
+$ sys apply init.lua           # Installs ripgrep@15.1.0 (creates snapshot 1)
 $ # Edit sys.lua to remove ripgrep
-$ sys apply sys.lua           # Removes ripgrep symlink (creates snapshot 2)
+$ sys apply init.lua           # Removes ripgrep symlink (creates snapshot 2)
 $ sys gc                      # Does NOT delete ripgrep object (snapshot 1 references it)
 $ sys rollback <snapshot 1>   # Can still rollback (object exists)
 $ sys gc --delete-old-snapshots --keep 5  # Delete old snapshots
@@ -2859,7 +3943,7 @@ $ sys gc                      # NOW ripgrep object can be deleted
 sys.lua generates **separate environment scripts for each user** defined in the configuration. This ensures user-scoped packages and environment variables are isolated:
 
 ```
-~/.local/share/sys/
+~/.local/share/syslua/
 ├── env.sh              # System-level env (all users)
 ├── env.fish
 ├── env.ps1
@@ -2883,20 +3967,20 @@ sys.lua generates **separate environment scripts for each user** defined in the 
 
 ```bash
 # ian's ~/.bashrc
-[ -f ~/.local/share/sys/env.sh ] && source ~/.local/share/sys/env.sh
-[ -f ~/.local/share/sys/users/ian/env.sh ] && source ~/.local/share/sys/users/ian/env.sh
+[ -f ~/.local/share/syslua/env.sh ] && source ~/.local/share/syslua/env.sh
+[ -f ~/.local/share/syslua/users/ian/env.sh ] && source ~/.local/share/syslua/users/ian/env.sh
 ```
 
 ### Session Variables
 
 Session variables are written to shell-specific scripts:
 
-| Platform    | Script Location               | Shell Integration                    |
-| ----------- | ----------------------------- | ------------------------------------ |
-| Linux/macOS | `~/.local/share/sys/env.sh`   | Sourced in `.bashrc`/`.zshrc`        |
-| Linux/macOS | `~/.local/share/sys/env.fish` | Sourced in `config.fish`             |
-| Windows     | `~/.local/share/sys/env.ps1`  | Sourced in PowerShell `$PROFILE`     |
-| Windows     | `~/.local/share/sys/env.cmd`  | Via `AutoRun` registry key (cmd.exe) |
+| Platform    | Script Location                  | Shell Integration                    |
+| ----------- | -------------------------------- | ------------------------------------ |
+| Linux/macOS | `~/.local/share/syslua/env.sh`   | Sourced in `.bashrc`/`.zshrc`        |
+| Linux/macOS | `~/.local/share/syslua/env.fish` | Sourced in `config.fish`             |
+| Windows     | `~/.local/share/syslua/env.ps1`  | Sourced in PowerShell `$PROFILE`     |
+| Windows     | `~/.local/share/syslua/env.cmd`  | Via `AutoRun` registry key (cmd.exe) |
 
 ```bash
 # Unix: env.sh (sourced by user's shell)
@@ -2914,7 +3998,7 @@ $env:EDITOR = "nvim"
 
 ```bash
 # Unix: ~/.bashrc or ~/.zshrc
-[ -f ~/.local/share/sys/env.sh ] && source ~/.local/share/sys/env.sh
+[ -f ~/.local/share/syslua/env.sh ] && source ~/.local/share/syslua/env.sh
 ```
 
 ```powershell
@@ -2928,11 +4012,11 @@ if (Test-Path "$env:USERPROFILE\.local\share\sys\env.ps1") {
 
 Persistent variables are written directly to OS-level configuration, available to all processes (including GUI apps and services):
 
-| Platform | System Location                   | User Location                          |
-| -------- | --------------------------------- | -------------------------------------- |
-| Linux    | `/etc/environment`                | `~/.pam_environment`                   |
-| macOS    | `/etc/launchd.conf` + `launchctl` | `~/Library/LaunchAgents/sys.env.plist` |
-| Windows  | Registry `HKLM\...\Environment`   | Registry `HKCU\Environment`            |
+| Platform | System Location                   | User Location                             |
+| -------- | --------------------------------- | ----------------------------------------- |
+| Linux    | `/etc/environment`                | `~/.pam_environment`                      |
+| macOS    | `/etc/launchd.conf` + `launchctl` | `~/Library/LaunchAgents/syslua.env.plist` |
+| Windows  | Registry `HKLM\...\Environment`   | Registry `HKCU\Environment`               |
 
 ```bash
 # Example: After applying config with env.persistent { JAVA_HOME = "..." }
@@ -3083,7 +4167,7 @@ On Windows, file permissions are ignored (Windows has a different permission mod
 
 ### File Tracking
 
-sys.lua tracks which files it manages in `~/.local/share/sys/managed_files.json`. This enables:
+sys.lua tracks which files it manages in `~/.local/share/syslua/managed_files.json`. This enables:
 
 - Removing files when they're removed from config
 - Detecting changes to managed files
@@ -3180,7 +4264,7 @@ Services can use the `config` property for platform-specific configuration:
 
 ```lua
 -- modules/postgresql.lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 return module "postgresql" {
     options = {
@@ -3900,7 +4984,7 @@ network {
 
     -- Authenticated proxy using string.format()
     proxy = {
-        http = string.format("http://%s:%s@proxy.example.com:8080", 
+        http = string.format("http://%s:%s@proxy.example.com:8080",
                            secrets.proxy_user, secrets.proxy_pass),
         https = string.format("http://%s:%s@proxy.example.com:8080",
                             secrets.proxy_user, secrets.proxy_pass),
@@ -4027,7 +5111,7 @@ sys.lua supports project-local configurations similar to Python's virtualenv or 
 
 ```lua
 -- project/sys.lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 
 project {
     name = "my-web-app",
@@ -4087,7 +5171,7 @@ Run 'sudo sys apply' to install missing packages first.
 sys.lua integrates with direnv for automatic environment activation:
 
 ```bash
-# ~/.config/direnv/lib/sys.sh
+# ~/.config/direnv/lib/syslua.sh
 use_sys() {
     if [[ -f sys.lua ]]; then
         eval "$(sys env --shell bash)"
@@ -4200,7 +5284,7 @@ sys.lua uses Lua's built-in string formatting capabilities for generating config
 **Using `string.format()`:**
 
 ```lua
-local lib = require("sys.lib")
+local lib = require("syslua.lib")
 local secrets = sops.load("./secrets.yaml")
 
 -- Simple formatting
@@ -4225,13 +5309,13 @@ local db_config = string.format([[
 
 **Format specifiers:**
 
-| Specifier | Type    | Description               | Example                         |
-| --------- | ------- | ------------------------- | ------------------------------- |
-| `%s`      | string  | String substitution       | `string.format("%s", "text")`   |
-| `%d`      | integer | Integer                   | `string.format("%d", 42)`       |
-| `%f`      | float   | Floating point            | `string.format("%.2f", 3.14)`   |
-| `%q`      | string  | Quoted string (escaped)   | `string.format("%q", "a\"b")`   |
-| `%%`      | literal | Literal percent sign      | `string.format("100%%")`        |
+| Specifier | Type    | Description             | Example                       |
+| --------- | ------- | ----------------------- | ----------------------------- |
+| `%s`      | string  | String substitution     | `string.format("%s", "text")` |
+| `%d`      | integer | Integer                 | `string.format("%d", 42)`     |
+| `%f`      | float   | Floating point          | `string.format("%.2f", 3.14)` |
+| `%q`      | string  | Quoted string (escaped) | `string.format("%q", "a\"b")` |
+| `%%`      | literal | Literal percent sign    | `string.format("100%%")`      |
 
 **Alternative: String concatenation:**
 
@@ -4249,7 +5333,7 @@ local nginx_config = [[
 server {
     listen 80;
     server_name ]] .. domain .. [[;
-    
+
     location / {
         proxy_pass ]] .. backend_url .. [[;
     }
@@ -4306,26 +5390,21 @@ sys.lua provides platform detection for conditional configuration.
 
 ### Platform Information
 
-```lua
+````lua
 ### Platform and System Information
 
 System information is available via the global `sys` table:
 
 ```lua
--- Platform detection
-sys.platform   -- "x86_64-linux", "aarch64-darwin", etc.
-sys.os         -- "linux", "darwin", "windows"
-sys.arch       -- "x86_64", "aarch64", "arm"
+syslua.platform   -- "x86_64-linux", "aarch64-darwin", etc.
+syslua.os         -- "linux", "darwin", "windows"
+syslua.arch       -- "x86_64", "aarch64", "arm"
 
--- Boolean helpers for common checks
-sys.is_linux   -- true/false
-sys.is_darwin  -- true/false
-sys.is_windows -- true/false
-
--- Host information
-sys.hostname   -- "my-laptop"
-sys.username   -- "ian"
-```
+-- Boolean helpers
+syslua.is_linux   -- true/false
+syslua.is_darwin  -- true/false
+syslua.is_windows -- true/false
+````
 
 ### Conditional Configuration
 
@@ -4333,11 +5412,11 @@ Use native Lua conditionals for platform-specific configuration:
 
 ```lua
 -- Platform-specific packages
-if sys.is_darwin then
-    pkg("mas")  -- Mac App Store CLI
+if syslua.is_darwin then
+    pkg "pbcopy"  -- macOS clipboard
 end
 
-if sys.is_linux then
+if syslua.is_linux then
     pkg("apt-file")
 end
 
@@ -4349,26 +5428,9 @@ service "tailscale" {
     windows = { ... },  -- Windows-specific
 }
 
--- Host-specific config
-if sys.hostname == "work-laptop" then
-    require("./modules/work")
-end
-
-if sys.hostname == "home-server" then
-    require("./modules/server")
-end
-
--- OS-specific environment variables
-env {
-    BROWSER = sys.is_darwin and "open" or "xdg-open",
-}
-
--- Platform-specific PATH entries
-if sys.is_darwin then
-    env {
-        PATH = lib.mkBefore({ "/opt/homebrew/bin" }),
-    }
-end
+-- Host information
+syslua.hostname   -- "my-laptop"
+syslua.username   -- "ian"
 ```
 
 ---
@@ -4462,13 +5524,13 @@ activation {
     post = [[echo "Apply complete"]],
 }
 
-if sys.is_linux then
+if syslua.is_linux then
     activation {
         post = [[systemctl daemon-reload]],
     }
 end
 
-if sys.is_darwin then
+if syslua.is_darwin then
     activation {
         post = [[killall Finder]],
     }
@@ -4495,7 +5557,7 @@ System configuration provides the foundation; user configuration extends and cus
 └── metadata/         # System state and snapshots
 
 # Per-user stores (managed by each user, no sudo required)
-~/.local/share/sys/
+~/.local/share/syslua/
 ├── store/
 │   ├── obj/          # User's packages (hardlinks to system when possible)
 │   ├── pkg/          # User's package symlinks
@@ -4511,10 +5573,11 @@ System configuration provides the foundation; user configuration extends and cus
 
 ```bash
 # IT manages system configuration
-sudo sys apply /etc/sys/system.lua
+sudo sys apply /etc/syslua/init.lua
 ```
 
 System config controls:
+
 - ✅ System packages (available to all users)
 - ✅ System services (sshd, nginx, postgresql, etc.)
 - ✅ System files (`/etc`, `/Library`, `/opt`, etc.)
@@ -4525,11 +5588,12 @@ System config controls:
 
 ```bash
 # Users manage their own configuration
-sys apply ~/.config/sys/sys.lua
+sys apply ~/.config/syslua/init.lua
 ```
 
 User config controls:
-- ✅ Personal packages (installed to `~/.local/share/sys/store`)
+
+- ✅ Personal packages (installed to `~/.local/share/syslua/store`)
 - ✅ Personal files (anywhere in home directory)
 - ✅ Session environment variables (shell only)
 - ✅ User-scoped services (runs as user, not root)
@@ -4541,7 +5605,7 @@ User config controls:
 ### Example: System Configuration (IT Admin)
 
 ```lua
--- /etc/sys/system.lua (managed by IT, applied with sudo)
+-- /etc/syslua/system.lua (managed by IT, applied with sudo)
 
 -- System-wide packages (available to all users)
 pkg("git")
@@ -4581,7 +5645,7 @@ user {
         -- Provision Alice with dev tools
         pkg("python3")
         pkg("nodejs")
-        
+
         file {
             path = "~/.gitconfig",
             content = [[
@@ -4605,7 +5669,7 @@ user {
 ### Example: User Configuration (Alice)
 
 ```lua
--- ~/.config/sys/sys.lua (managed by Alice, applied without sudo)
+-- ~/.config/syslua/sys.lua (managed by Alice, applied without sudo)
 
 -- Alice's personal packages
 pkg("neovim")
@@ -4658,8 +5722,8 @@ service "syncthing" {
 
 ```bash
 # System configuration (IT admin)
-$ sudo sys apply /etc/sys/system.lua
-Evaluating /etc/sys/system.lua...
+$ sudo sys apply /etc/syslua
+Evaluating /etc/syslua...
 Installing to /syslua/store...
   ✓ git@2.40.0
   ✓ docker@24.0.0
@@ -4671,14 +5735,14 @@ Writing system files...
 System apply complete!
 
 # User configuration (no sudo)
-$ sys apply ~/.config/sys/sys.lua
-Evaluating /home/alice/.config/sys/sys.lua...
-Installing to /home/alice/.local/share/sys/store...
+$ sys apply ~/.config/syslua
+Evaluating /home/alice/.config/syslua...
+Installing to /home/alice/.local/share/syslua/store...
   ✓ neovim@0.10.0
   ✓ ripgrep@15.1.0 (hardlinked from system store)
   ✓ fzf@0.48.0
 Warning: Overriding system-managed file: ~/.gitconfig
-  System config: /etc/sys/system.lua (line 35)
+  System config: /etc/syslua/system.lua (line 35)
   Continue? [y/N] y
 Writing user files...
   ✓ ~/.gitconfig (overridden)
@@ -4686,28 +5750,28 @@ Writing user files...
 Configuring user services...
   ✓ syncthing.service enabled (user)
 Generating environment scripts...
-  ✓ ~/.local/share/sys/env.sh
-  ✓ ~/.local/share/sys/env.fish
+  ✓ ~/.local/share/syslua/env.sh
+  ✓ ~/.local/share/syslua/env.fish
 
 User apply complete!
 
 Add to your ~/.bashrc:
-  [ -f ~/.local/share/sys/env.sh ] && source ~/.local/share/sys/env.sh
+  [ -f ~/.local/share/syslua/env.sh ] && source ~/.local/share/syslua/env.sh
 ```
 
 ### Conflict Resolution
 
 When a user applies their config, sys.lua enforces boundaries:
 
-| Resource Type | System Owns | User Owns | Conflict Resolution |
-|---------------|-------------|-----------|---------------------|
-| **Packages** | System packages | User packages | Merged (no conflict) |
-| **System files** | `/etc`, `/Library`, `/opt` | N/A | User blocked (error) |
-| **User files** | Can provision | Can override | User warned, allowed |
-| **System services** | `sshd`, `docker`, etc. | N/A | User blocked (error) |
-| **User services** | N/A | `syncthing`, etc. | User allowed |
-| **Session env** | Can set defaults | Can override | User wins (warned) |
-| **Persistent env** | System only | N/A | User blocked (error) |
+| Resource Type       | System Owns                | User Owns         | Conflict Resolution  |
+| ------------------- | -------------------------- | ----------------- | -------------------- |
+| **Packages**        | System packages            | User packages     | Merged (no conflict) |
+| **System files**    | `/etc`, `/Library`, `/opt` | N/A               | User blocked (error) |
+| **User files**      | Can provision              | Can override      | User warned, allowed |
+| **System services** | `sshd`, `docker`, etc.     | N/A               | User blocked (error) |
+| **User services**   | N/A                        | `syncthing`, etc. | User allowed         |
+| **Session env**     | Can set defaults           | Can override      | User wins (warned)   |
+| **Persistent env**  | System only                | N/A               | User blocked (error) |
 
 ### Security Model
 
@@ -4721,21 +5785,21 @@ When a user applies their config, sys.lua enforces boundaries:
 │  • Persistent environment variables                      │
 │  • User provisioning (IT-managed user configs)           │
 │                                                           │
-│  Command: sudo sys apply /etc/sys/system.lua             │
+│  Command: sudo sys apply /etc/syslua/init.lua             │
 └───────────────────────┬─────────────────────────────────┘
                         │
                         ▼
 ┌─────────────────────────────────────────────────────────┐
 │              Regular User (no sudo)                      │
 ├─────────────────────────────────────────────────────────┤
-│  • Personal packages (~/.local/share/sys/store)          │
+│  • Personal packages (~/.local/share/syslua/store)          │
 │  • Personal files (~/...)                                │
 │  • Session environment variables                         │
 │  • User-scoped services (syncthing, etc.)                │
 │  • Can read system packages                              │
 │  • Can override IT-set user files (with warning)         │
 │                                                           │
-│  Command: sys apply ~/.config/sys/sys.lua                │
+│  Command: sys apply ~/.config/syslua/init.lua                │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -4749,28 +5813,28 @@ Users can reference system packages without duplication:
 └── bin/git
 
 # Alice's store can hardlink to system store (same filesystem)
-~/.local/share/sys/store/pkg/git/2.40.0/
+~/.local/share/syslua/store/pkg/git/2.40.0/
 └── bin/git → /syslua/store/obj/abc123.../bin/git  (hardlink)
 
 # Or just reference via PATH (different filesystem)
-~/.local/share/sys/env.sh:
+~/.local/share/syslua/env.sh:
   export PATH="/syslua/store/pkg/git/2.40.0/bin:$PATH"
 ```
 
 ### User Environment Script
 
 ```bash
-# ~/.local/share/sys/env.sh (generated by sys apply)
+# ~/.local/share/syslua/env.sh (generated by sys apply)
 
 # System packages (from /syslua/store)
 export PATH="/syslua/store/pkg/git/2.40.0/bin:$PATH"
 export PATH="/syslua/store/pkg/vim/9.0.0/bin:$PATH"
 export PATH="/syslua/store/pkg/docker/24.0.0/bin:$PATH"
 
-# User packages (from ~/.local/share/sys/store)
-export PATH="$HOME/.local/share/sys/store/pkg/neovim/0.10.0/bin:$PATH"
-export PATH="$HOME/.local/share/sys/store/pkg/ripgrep/15.1.0/bin:$PATH"
-export PATH="$HOME/.local/share/sys/store/pkg/fzf/0.48.0/bin:$PATH"
+# User packages (from ~/.local/share/syslua/store)
+export PATH="$HOME/.local/share/syslua/store/pkg/neovim/0.10.0/bin:$PATH"
+export PATH="$HOME/.local/share/syslua/store/pkg/ripgrep/15.1.0/bin:$PATH"
+export PATH="$HOME/.local/share/syslua/store/pkg/fzf/0.48.0/bin:$PATH"
 
 # System env vars (session)
 export LANG="en_US.UTF-8"
@@ -4789,9 +5853,9 @@ When a user applies their configuration, sys.lua enforces clear boundaries betwe
 ```
 APPLY_USER_CONFIG(user_config):
     user_manifest = EVALUATE(user_config)
-    system_manifest = LOAD_SYSTEM_MANIFEST()  // From /etc/sys/system.lua
+    system_manifest = LOAD_SYSTEM_MANIFEST()  // From /etc/syslua/system.lua
     current_user = GET_CURRENT_USER()
-    
+
     // Phase 1: Package validation and merging
     FOR EACH pkg IN user_manifest.packages:
         // Users can install any packages they want
@@ -4802,54 +5866,54 @@ APPLY_USER_CONFIG(user_config):
         ELSE:
             // Download to user store
             user_manifest.packages[pkg].source = "user-store"
-    
+
     // Phase 2: File validation
     FOR EACH file IN user_manifest.files:
         // Block system file modification
-        IF file.path STARTS_WITH "/etc" OR 
+        IF file.path STARTS_WITH "/etc" OR
            file.path STARTS_WITH "/Library" OR
            file.path STARTS_WITH "/opt" OR
            file.path STARTS_WITH "C:\\Windows" OR
            file.path STARTS_WITH "C:\\Program Files":
             ERROR "Cannot modify system files: {file.path}"
-            ERROR "System files are managed by: sudo sys apply /etc/sys/system.lua"
+            ERROR "System files are managed by: sudo sys apply /etc/syslua/init.lua"
             ABORT
-        
+
         // Check if overriding IT-managed user file
         FOR EACH system_user IN system_manifest.users:
             IF system_user.name == current_user:
                 FOR EACH system_file IN system_user.files:
                     IF file.path == system_file.path:
                         WARN "⚠ Overriding IT-managed file: {file.path}"
-                        WARN "  System config: /etc/sys/system.lua"
+                        WARN "  System config: /etc/syslua/system.lua"
                         WARN "  Your version will take precedence"
                         IF NOT user_confirms("Continue?"):
                             ABORT
-        
+
         // Validate path is in user's home directory
         IF NOT file.path STARTS_WITH "~/" AND
            NOT file.path STARTS_WITH HOME_DIRECTORY:
             ERROR "Users can only manage files in their home directory"
             ABORT
-    
+
     // Phase 3: Service validation
     FOR EACH service IN user_manifest.services:
         // Block system service management
         IF NOT service.user:
             ERROR "Cannot manage system services: {service.name}"
             ERROR "Use 'user = true' for user-scoped services"
-            ERROR "System services are managed by: sudo sys apply /etc/sys/system.lua"
+            ERROR "System services are managed by: sudo sys apply /etc/syslua/init.lua"
             ABORT
-        
+
         // Check for conflicts with system services
         IF service.name IN system_manifest.services:
             ERROR "Service {service.name} is managed by system config"
-            ERROR "System config: /etc/sys/system.lua"
+            ERROR "System config: /etc/syslua/system.lua"
             ABORT
-        
+
         // User-scoped service is allowed
         service.run_as_user = current_user
-    
+
     // Phase 4: Environment variable validation
     FOR EACH (var, value) IN user_manifest.env.session:
         // Check for system persistent env vars (cannot override)
@@ -4858,79 +5922,79 @@ APPLY_USER_CONFIG(user_config):
             WARN "  System value: {system_manifest.env.persistent[var]}"
             WARN "  Skipping user value: {value}"
             SKIP
-        
+
         // Warn about system session env var override
         IF var IN system_manifest.env.session:
             WARN "⚠ Overriding system env var: {var}"
             WARN "  System value: {system_manifest.env.session[var]}"
             WARN "  User value: {value}"
-        
+
         // Allowed
         user_manifest.env.session[var] = value
-    
+
     // Phase 5: Block persistent env vars for users
     IF user_manifest.env.persistent IS NOT EMPTY:
         ERROR "Users cannot set persistent environment variables"
-        ERROR "Persistent vars are system-wide and managed by: sudo sys apply /etc/sys/system.lua"
+        ERROR "Persistent vars are system-wide and managed by: sudo sys apply /etc/syslua/init.lua"
         ERROR "Use session env vars instead (they apply to your shell only)"
         ABORT
-    
+
     // Phase 6: Apply user configuration
-    APPLY_USER_MANIFEST(user_manifest, "~/.local/share/sys/store")
+    APPLY_USER_MANIFEST(user_manifest, "~/.local/share/syslua/store")
     GENERATE_USER_ENV_SCRIPTS(user_manifest, system_manifest)
     CREATE_USER_SNAPSHOT(user_manifest)
-    
+
     PRINT "User apply complete!"
 
 LOAD_SYSTEM_MANIFEST():
     // Load system manifest if exists
-    IF EXISTS("/etc/sys/system.lua"):
+    IF EXISTS("/etc/syslua/system.lua"):
         RETURN CACHED_MANIFEST("/syslua/store/metadata/manifest.json")
     ELSE:
         RETURN EMPTY_MANIFEST
 
 GENERATE_USER_ENV_SCRIPTS(user_manifest, system_manifest):
     env_script = ""
-    
+
     // Add system packages first
     FOR EACH pkg IN system_manifest.packages:
         env_script += "export PATH=\"/syslua/store/pkg/{pkg.name}/{pkg.version}/bin:$PATH\"\n"
-    
+
     // Add user packages (higher priority in PATH)
     FOR EACH pkg IN user_manifest.packages:
         IF pkg.source == "system-store":
             // Already in PATH via system, skip
             CONTINUE
         ELSE:
-            env_script += "export PATH=\"$HOME/.local/share/sys/store/pkg/{pkg.name}/{pkg.version}/bin:$PATH\"\n"
-    
+            env_script += "export PATH=\"$HOME/.local/share/syslua/store/pkg/{pkg.name}/{pkg.version}/bin:$PATH\"\n"
+
     // Add system session env vars
     FOR EACH (var, value) IN system_manifest.env.session:
         IF var NOT IN user_manifest.env.session:
             env_script += "export {var}=\"{value}\"\n"
-    
+
     // Add user env vars (overrides system session vars)
     FOR EACH (var, value) IN user_manifest.env.session:
         env_script += "export {var}=\"{value}\"\n"
-    
-    WRITE("~/.local/share/sys/env.sh", env_script)
+
+    WRITE("~/.local/share/syslua/env.sh", env_script)
 ```
 
 ### Platform-Specific Admin Detection
 
-| Platform | System Config Requires | User Config Requires |
-|----------|----------------------|---------------------|
-| Linux    | `geteuid() == 0`     | Regular user (non-root) |
-| macOS    | `geteuid() == 0`     | Regular user (non-root) |
-| Windows  | Administrator token  | Regular user |
+| Platform | System Config Requires | User Config Requires    |
+| -------- | ---------------------- | ----------------------- |
+| Linux    | `geteuid() == 0`       | Regular user (non-root) |
+| macOS    | `geteuid() == 0`       | Regular user (non-root) |
+| Windows  | Administrator token    | Regular user            |
 
 **Admin check pseudocode:**
 
 ```
 IS_SYSTEM_CONFIG_PATH(config_path):
     // System configs are in specific locations
-    RETURN config_path STARTS_WITH "/etc/sys/" OR
-           config_path STARTS_WITH "C:\\ProgramData\\sys\\" OR
+    RETURN config_path STARTS_WITH "/etc/syslua/" OR
+           config_path STARTS_WITH "C:\\ProgramData\\syslua\\" OR
            config_path STARTS_WITH "/Library/sys/"
 
 VALIDATE_PRIVILEGES(config_path):
@@ -4942,8 +6006,8 @@ VALIDATE_PRIVILEGES(config_path):
     ELSE:
         IF IS_ADMIN():
             WARN "⚠ Running user config as admin is not recommended"
-            WARN "System configs should be in /etc/sys/"
-            WARN "User configs should be in ~/.config/sys/"
+            WARN "System configs should be in /etc/syslua/"
+            WARN "User configs should be in ~/.config/syslua/"
             IF NOT user_confirms("Continue?"):
                 ABORT
 ```
@@ -4997,7 +6061,7 @@ $ sys apply --log-format json sys.lua
 -- sys.lua
 logging {
     level = "info",
-    file = "/var/log/sys/apply.log",
+    file = "/var/log/syslua/apply.log",
     format = "pretty",  -- "pretty", "json", "compact"
 
     -- Per-component log levels
@@ -5032,11 +6096,11 @@ logging {
 
 ### Log Locations
 
-| Platform | Default Log Location                                                                 |
-| -------- | ------------------------------------------------------------------------------------ |
-| Linux    | `/var/log/sys/sys.log` (system), `~/.local/state/sys/sys.log` (user)                 |
-| macOS    | `/var/log/sys/sys.log` (system), `~/Library/Logs/sys/sys.log` (user)                 |
-| Windows  | `C:\ProgramData\sys\logs\sys.log` (system), `%LOCALAPPDATA%\sys\logs\sys.log` (user) |
+| Platform | Default Log Location                                                                       |
+| -------- | ------------------------------------------------------------------------------------------ |
+| Linux    | `/var/log/syslua/sys.log` (system), `~/.local/state/syslua/sys.log` (user)                 |
+| macOS    | `/var/log/syslua/sys.log` (system), `~/Library/Logs/syslua/sys.log` (user)                 |
+| Windows  | `C:\ProgramData\syslua\logs\sys.log` (system), `%LOCALAPPDATA%\syslua\logs\sys.log` (user) |
 
 ### Debugging Tools
 
@@ -5150,7 +6214,7 @@ Options:
      end
 
   3. Use platform conditionals to skip on unsupported platforms:
-     if not sys.is_darwin then
+     if not syslua.is_darwin then
        pkg("custom-tool")
      end
 
@@ -5252,7 +6316,7 @@ sys.lua maintains backward compatibility with config files:
 
 ```lua
 -- sys.lua
-if sys.version < "0.5" then
+if syslua.version < "0.5" then
     error("This config requires sys.lua >= 0.5")
 end
 ```
@@ -5260,7 +6324,7 @@ end
 **Deprecation warnings:**
 
 ```
-Warning: sys.registry() is deprecated and will be removed in 0.6
+Warning: syslua.registry() is deprecated and will be removed in 0.6
   Use: local inputs = { pkgs = input "github:sys-lua/pkgs" }
   Location: sys.lua:10
 ```
