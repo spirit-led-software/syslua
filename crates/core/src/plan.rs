@@ -338,12 +338,15 @@ mod tests {
         let manifest = Manifest {
             files: vec![FileDecl {
                 path: temp_dir.path().join("link.txt"),
-                symlink: Some(target.clone()),
+                source: None,
                 content: None,
-                copy: None,
+                mutable: false,
                 mode: None,
+                symlink: Some(target.clone()),
+                copy: None,
             }],
             envs: vec![],
+            inputs: vec![],
         };
 
         let plan = compute_plan(&manifest).unwrap();
@@ -366,12 +369,15 @@ mod tests {
         let manifest = Manifest {
             files: vec![FileDecl {
                 path: link.clone(),
-                symlink: Some(target.clone()),
+                source: None,
                 content: None,
-                copy: None,
+                mutable: false,
                 mode: None,
+                symlink: Some(target.clone()),
+                copy: None,
             }],
             envs: vec![],
+            inputs: vec![],
         };
 
         let plan = compute_plan(&manifest).unwrap();
@@ -387,12 +393,15 @@ mod tests {
         let manifest = Manifest {
             files: vec![FileDecl {
                 path: temp_dir.path().join("new.txt"),
-                symlink: None,
+                source: None,
                 content: Some("Hello, World!".to_string()),
-                copy: None,
+                mutable: false,
                 mode: None,
+                symlink: None,
+                copy: None,
             }],
             envs: vec![],
+            inputs: vec![],
         };
 
         let plan = compute_plan(&manifest).unwrap();

@@ -184,6 +184,46 @@ impl Platform {
         let filename = format!("env.{}", shell.script_extension());
         self.env_script_dir().join(filename)
     }
+
+    /// Get the path for profile scripts (derivation-based env)
+    ///
+    /// - Linux: `~/.local/share/syslua/`
+    /// - macOS: `~/Library/Application Support/syslua/`
+    /// - Windows: `%LOCALAPPDATA%\syslua\`
+    pub fn profile_dir(&self) -> std::path::PathBuf {
+        match self.os {
+            Os::Linux => self.home_dir.join(".local/share/syslua"),
+            Os::Darwin => self.home_dir.join("Library/Application Support/syslua"),
+            Os::Windows => dirs::data_local_dir()
+                .unwrap_or_else(|| self.home_dir.clone())
+                .join("syslua"),
+        }
+    }
+
+    /// Get the path for input caching
+    ///
+    /// - Linux: `~/.local/share/syslua/inputs`
+    /// - macOS: `~/Library/Caches/syslua/inputs`
+    /// - Windows: `%LOCALAPPDATA%\syslua\inputs`
+    pub fn input_cache_dir(&self) -> std::path::PathBuf {
+        match self.os {
+            Os::Linux => self.home_dir.join(".local/share/syslua/inputs"),
+            Os::Darwin => self.home_dir.join("Library/Caches/syslua/inputs"),
+            Os::Windows => dirs::cache_dir()
+                .unwrap_or_else(|| self.home_dir.clone())
+                .join("syslua")
+                .join("inputs"),
+        }
+    }
+
+    /// Get the path for snapshots storage
+    ///
+    /// - Linux: `~/.local/share/syslua/snapshots`
+    /// - macOS: `~/Library/Application Support/syslua/snapshots`
+    /// - Windows: `%LOCALAPPDATA%\syslua\snapshots`
+    pub fn snapshots_dir(&self) -> std::path::PathBuf {
+        self.profile_dir().join("snapshots")
+    }
 }
 
 #[cfg(test)]

@@ -1,8 +1,9 @@
 //! Manifest types representing desired system state
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use sys_lua::{EnvDecl, FileDecl};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use sys_lua::{EnvDecl, FileDecl, InputDecl};
 
 /// A manifest representing the desired system state
 ///
@@ -13,6 +14,8 @@ pub struct Manifest {
     pub files: Vec<FileDecl>,
     /// Environment variable declarations
     pub envs: Vec<EnvDecl>,
+    /// Input declarations (external packages/registries)
+    pub inputs: Vec<InputDecl>,
 }
 
 impl Manifest {
@@ -21,6 +24,7 @@ impl Manifest {
         Self {
             files: Vec::new(),
             envs: Vec::new(),
+            inputs: Vec::new(),
         }
     }
 
@@ -31,6 +35,24 @@ impl Manifest {
         Ok(Self {
             files: result.files,
             envs: result.envs,
+            inputs: result.inputs,
+        })
+    }
+
+    /// Create a manifest from a Lua config file with pre-resolved inputs
+    ///
+    /// The `resolved_inputs` map contains source URI -> local path mappings.
+    /// This is used when inputs have already been resolved from a lock file.
+    pub fn from_config_with_inputs(
+        config_path: &Path,
+        resolved_inputs: &HashMap<String, PathBuf>,
+    ) -> Result<Self, sys_lua::LuaError> {
+        let result = sys_lua::evaluate_config_with_inputs(config_path, resolved_inputs)?;
+
+        Ok(Self {
+            files: result.files,
+            envs: result.envs,
+            inputs: result.inputs,
         })
     }
 
@@ -42,6 +64,11 @@ impl Manifest {
     /// Add an environment variable declaration
     pub fn add_env(&mut self, env: EnvDecl) {
         self.envs.push(env);
+    }
+
+    /// Add an input declaration
+    pub fn add_input(&mut self, input: InputDecl) {
+        self.inputs.push(input);
     }
 }
 
@@ -76,10 +103,12 @@ mod tests {
 
         manifest.add_file(FileDecl {
             path: PathBuf::from("/tmp/test.txt"),
-            symlink: None,
+            source: None,
             content: Some("Hello".to_string()),
-            copy: None,
+            mutable: false,
             mode: None,
+            symlink: None,
+            copy: None,
         });
 
         assert_eq!(manifest.files.len(), 1);
