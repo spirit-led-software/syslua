@@ -19,6 +19,10 @@ use crate::lua::outputs::parse_outputs;
 use crate::manifest::Manifest;
 
 impl LuaUserData for BuildCtx {
+  fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+    fields.add_field_method_get("out", |_, this| Ok(this.out().to_string()));
+  }
+
   fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
     methods.add_method_mut("fetch_url", |_, this, (url, sha256): (String, String)| {
       Ok(this.fetch_url(&url, &sha256))
@@ -628,6 +632,83 @@ mod tests {
       // inputs should be nil, not an empty table
       let inputs: LuaValue = result.get("inputs")?;
       assert_eq!(inputs, LuaValue::Nil);
+
+      Ok(())
+    }
+
+    #[test]
+    fn ctx_out_returns_placeholder() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      // Test that ctx.out returns the $${out} placeholder
+      let result: LuaTable = lua
+        .load(
+          r#"
+                return sys.build({
+                    name = "test-out",
+                    apply = function(inputs, ctx)
+                        -- ctx.out should return $${out} placeholder
+                        ctx:cmd("mkdir -p " .. ctx.out .. "/bin")
+                        return { out = ctx.out }
+                    end,
+                })
+            "#,
+        )
+        .eval()?;
+
+      let outputs: LuaTable = result.get("outputs")?;
+      let out: String = outputs.get("out")?;
+
+      // The output value should contain the build placeholder (resolved from ctx.out)
+      // Since ctx.out returns "$${out}" and that's returned as the output value,
+      // the final placeholder wraps it as $${build:HASH:out}
+      let hash: String = result.get("hash")?;
+      assert_eq!(out, format!("$${{build:{}:out}}", hash));
+
+      Ok(())
+    }
+
+    #[test]
+    fn ctx_out_can_be_used_in_commands() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      lua
+        .load(
+          r#"
+                sys.build({
+                    name = "uses-out",
+                    apply = function(inputs, ctx)
+                        ctx:cmd("mkdir -p " .. ctx.out .. "/bin")
+                        ctx:cmd("cp binary " .. ctx.out .. "/bin/")
+                        return { out = ctx.out }
+                    end,
+                })
+            "#,
+        )
+        .exec()?;
+
+      let manifest = manifest.borrow();
+      let (_, build_def) = manifest.builds.iter().next().unwrap();
+
+      // Check that the commands contain the $${out} placeholder
+      assert_eq!(build_def.apply_actions.len(), 2);
+
+      use crate::build::BuildAction;
+      match &build_def.apply_actions[0] {
+        BuildAction::Cmd { cmd, .. } => {
+          assert!(cmd.contains("$${out}"), "cmd should contain ${{out}} placeholder: {}", cmd);
+          assert_eq!(cmd, "mkdir -p $${out}/bin");
+        }
+        _ => panic!("expected Cmd action"),
+      }
+
+      match &build_def.apply_actions[1] {
+        BuildAction::Cmd { cmd, .. } => {
+          assert!(cmd.contains("$${out}"), "cmd should contain ${{out}} placeholder: {}", cmd);
+          assert_eq!(cmd, "cp binary $${out}/bin/");
+        }
+        _ => panic!("expected Cmd action"),
+      }
 
       Ok(())
     }

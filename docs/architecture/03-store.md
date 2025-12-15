@@ -36,8 +36,9 @@ sys.lua uses a multi-level store architecture:
 /syslua/store/
 ├── obj/<name>-<version>-<hash>/  # Realized build outputs (immutable, world-readable)
 │   ├── bin/                      # The actual content produced by the build
-│   ├── lib/
+│   ├── lib/                      # Hash is 20 chars (truncated SHA-256)
 │   └── ...
+├── bind/<hash>/                  # Bind state tracking (20-char hash)
 ├── drv/<hash>.drv                # Serialized build descriptions (for debugging/rebuilds)
 ├── drv-out/<hash>                # Maps build hash → output hash (cache index)
 └── metadata/
@@ -48,9 +49,9 @@ sys.lua uses a multi-level store architecture:
 
 ### Store Path Format
 
-- With version: `obj/ripgrep-15.1.0-abc123def/`
-- Without version: `obj/my-config-abc123def/`
-- Hash is truncated for readability (first 9 chars of full SHA-256)
+- With version: `obj/ripgrep-15.1.0-abc123def456789012/`
+- Without version: `obj/my-config-abc123def456789012/`
+- Hash is 20 chars (truncated SHA-256, defined as `HASH_PREFIX_LEN` in `consts.rs`)
 
 ### Key Directories
 
@@ -192,9 +193,10 @@ Objects in `obj/<hash>/` are made immutable after extraction:
      end,
      apply = function(inputs, ctx)
        local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-       ctx:cmd({ cmd = "mkdir -p " .. ctx.outputs.out .. "/bin" })
-       ctx:cmd({ cmd = "cp " .. archive .. " " .. ctx.outputs.out .. "/bin/jq" })
-       ctx:cmd({ cmd = "chmod 755 " .. ctx.outputs.out .. "/bin/jq" })
+       ctx:cmd({ cmd = "mkdir -p " .. ctx.out .. "/bin" })
+       ctx:cmd({ cmd = "cp " .. archive .. " " .. ctx.out .. "/bin/jq" })
+       ctx:cmd({ cmd = "chmod 755 " .. ctx.out .. "/bin/jq" })
+       return { out = ctx.out }
      end,
    })
 

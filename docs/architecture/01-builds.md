@@ -85,14 +85,14 @@ end
 
 ## Build Context (`BuildCtx`)
 
-The build context provides actions for fetching and shell execution. Each action returns a placeholder string that will be resolved during execution.
+The build context provides actions for fetching and shell execution. Each action returns an opaque string that can be stored and used in subsequent commands.
 
 ```lua
--- Fetch operations (returns placeholder)
-ctx:fetch_url(url, sha256)  -- Download file, verify hash, return "${action:N}"
+-- Fetch operations (returns opaque reference to downloaded file)
+ctx:fetch_url(url, sha256)  -- Download file, verify hash
 
--- Shell execution (returns placeholder)
-ctx:cmd(opts)               -- Execute a shell command, return "${action:N}"
+-- Shell execution (returns opaque reference to stdout)
+ctx:cmd(opts)               -- Execute a shell command
                             -- opts: string | { cmd, env?, cwd? }
 ```
 
@@ -108,7 +108,7 @@ ctx:cmd("make")
 ctx:cmd({
   cmd = "make install",
   cwd = "/build/src",
-  env = { PREFIX = ctx.outputs.out },
+  env = { PREFIX = ctx.out },
 })
 ```
 
@@ -144,11 +144,11 @@ rg.outputs        -- { out = <realized-store-output-path> }
 
 ## Build Hashing
 
-The build hash is computed from the serialized `BuildDef`:
+The build hash is a 20-character truncated SHA-256, computed from the serialized `BuildDef`:
 
 - `name`
 - `version` (if present)
-- `inputs` (evaluated `InputsRef`)
+- `inputs` (evaluated `InputsRef` - see below)
 - `apply_actions` (the commands and fetch operations)
 - `outputs` (if present)
 
@@ -159,16 +159,36 @@ This means:
 - Build dependencies are included via their hash in inputs
 - Action order matters - same actions in different order = different hash
 
-## Rust Types
+### InputsRef and Build Dependencies
 
-The build system uses a three-tier type architecture:
+When a build references another build in its inputs, the `InputsRef` stores only the referenced build's hash (not the full definition). This ensures:
 
-- **Spec** - Lua-side, contains closures, not serializable
-- **Def** - Evaluated, serializable, stored in Manifest
-- **Ref** - Content-addressed reference for cross-references
+- **Efficient hashing**: Build hashes depend on dependency hashes, not full definitions
+- **Deduplication**: Same dependency = same hash regardless of how it's referenced
+- **Clean serialization**: No circular references or duplicate data
 
 ```rust
-/// Hash for content-addressing builds
+/// Evaluated inputs (serializable)
+pub enum InputsRef {
+    String(String),
+    Number(f64),
+    Boolean(bool),
+    Table(BTreeMap<String, InputsRef>),
+    Array(Vec<InputsRef>),
+    Build(BuildHash),  // Just the 20-char hash, not full BuildRef
+    Bind(BindHash),    // Just the 20-char hash, not full BindRef
+}
+```
+
+## Rust Types
+
+The build system uses a two-tier type architecture:
+
+- **Spec** - Lua-side, contains closures, not serializable
+- **Def** - Evaluated, serializable, stored in Manifest (keyed by truncated hash)
+
+```rust
+/// Hash for content-addressing builds (20-char truncated SHA-256)
 pub struct BuildHash(pub String);
 
 /// Actions that can be performed during a build
@@ -198,13 +218,9 @@ pub struct BuildDef {
     pub outputs: Option<BTreeMap<String, String>>,
 }
 
-/// Content-addressed reference (for cross-references in inputs)
-pub struct BuildRef {
-    pub name: String,
-    pub version: Option<String>,
-    pub inputs: Option<InputsRef>,
-    pub outputs: HashMap<String, String>,
-    pub hash: BuildHash,
+impl BuildDef {
+    /// Compute the truncated hash for use as manifest key.
+    pub fn compute_hash(&self) -> Result<BuildHash, serde_json::Error>;
 }
 
 /// Build context provided to apply function
@@ -213,10 +229,12 @@ pub struct BuildCtx {
 }
 
 impl BuildCtx {
-    /// Fetch a URL with hash verification, returns placeholder
+    /// Fetch a URL with hash verification, returns an opaque reference
+    /// that resolves to the downloaded file path at execution time
     pub fn fetch_url(&mut self, url: &str, sha256: &str) -> String;
     
-    /// Execute a shell command, returns placeholder
+    /// Execute a shell command, returns an opaque reference
+    /// that resolves to the command's stdout at execution time
     pub fn cmd(&mut self, opts: impl Into<BuildCmdOptions>) -> String;
     
     /// Consume context and return accumulated actions
@@ -231,22 +249,23 @@ pub struct BuildCmdOptions {
 }
 ```
 
+Note: `BuildRef` is not a separate Rust struct - it's a Lua table with a metatable that provides the build's `name`, `version`, `hash`, `inputs`, and `outputs` fields.
+
 ### Placeholder System
 
-Both `fetch_url` and `cmd` return placeholder strings that reference action outputs:
-
-- `${action:N}` - stdout of action at index N within the same build
-
-These placeholders are resolved during execution when action outputs become available.
+Both `fetch_url` and `cmd` return opaque strings that can be stored in variables and used in subsequent commands. These are resolved during execution when action outputs become available.
 
 ```lua
 apply = function(inputs, ctx)
+  -- fetch_url returns an opaque reference to the downloaded file
   local archive = ctx:fetch_url(inputs.src.url, inputs.src.sha256)
-  -- archive is "${action:0}"
+  
+  -- Use the reference in the next command - it resolves to the actual path at runtime
   ctx:cmd({ cmd = "tar -xzf " .. archive .. " -C /build" })
-  -- The command contains "${action:0}" which resolves to the downloaded file path
 end
 ```
+
+**Important:** Users never write placeholder syntax directly. The return values from context methods handle this automatically. Shell variables like `$HOME` and `$PATH` work normally in command strings.
 
 ## Examples
 
@@ -273,7 +292,8 @@ local ripgrep = sys.build({
 
   apply = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.src.url, inputs.src.sha256)
-    ctx:cmd({ cmd = "tar -xzf " .. archive .. " -C " .. ctx.outputs.out })
+    ctx:cmd({ cmd = "tar -xzf " .. archive .. " -C " .. ctx.out })
+    return { out = ctx.out }
   end,
 })
 ```
@@ -307,8 +327,9 @@ local ripgrep = sys.build({
       env = { PATH = inputs.rust.outputs.out .. '/bin:' .. os.getenv('PATH') },
     })
 
-    ctx:cmd({ cmd = 'mkdir -p ' .. ctx.outputs.out .. '/bin' })
-    ctx:cmd({ cmd = 'cp /tmp/rg-src/target/release/rg ' .. ctx.outputs.out .. '/bin/rg' })
+    ctx:cmd({ cmd = 'mkdir -p ' .. ctx.out .. '/bin' })
+    ctx:cmd({ cmd = 'cp /tmp/rg-src/target/release/rg ' .. ctx.out .. '/bin/rg' })
+    return { out = ctx.out }
   end,
 })
 ```
@@ -328,19 +349,21 @@ sys.build({
 
   apply = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-    ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.outputs.out })
+    ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
 
     if sys.os == 'darwin' then
       -- macOS-specific post-processing
       ctx:cmd({
-        cmd = 'install_name_tool -id @rpath/libfoo.dylib ' .. ctx.outputs.out .. '/lib/libfoo.dylib'
+        cmd = 'install_name_tool -id @rpath/libfoo.dylib ' .. ctx.out .. '/lib/libfoo.dylib'
       })
     elseif sys.os == 'linux' then
       -- Linux-specific
       ctx:cmd({
-        cmd = "patchelf --set-rpath '$ORIGIN' " .. ctx.outputs.out .. '/lib/libfoo.so'
+        cmd = "patchelf --set-rpath '$ORIGIN' " .. ctx.out .. '/lib/libfoo.so'
       })
     end
+
+    return { out = ctx.out }
   end,
 })
 ```
@@ -360,7 +383,8 @@ local file_build = sys.build({
   name = 'file-gitconfig',
   inputs = { source = './dotfiles/gitconfig' },
   apply = function(inputs, ctx)
-    ctx:cmd({ cmd = 'cp ' .. inputs.source .. ' ' .. ctx.outputs.out .. '/content' })
+    ctx:cmd({ cmd = 'cp ' .. inputs.source .. ' ' .. ctx.out .. '/content' })
+    return { out = ctx.out }
   end,
 })
 
@@ -388,11 +412,12 @@ local env_build = sys.build({
   apply = function(inputs, ctx)
     -- Generate shell-specific fragments
     ctx:cmd({
-      cmd = 'echo \'export EDITOR="nvim"\nexport PAGER="less"\' > ' .. ctx.outputs.out .. '/env.sh'
+      cmd = 'echo \'export EDITOR="nvim"\nexport PAGER="less"\' > ' .. ctx.out .. '/env.sh'
     })
     ctx:cmd({
-      cmd = 'echo \'set -gx EDITOR "nvim"\nset -gx PAGER "less"\' > ' .. ctx.outputs.out .. '/env.fish'
+      cmd = 'echo \'set -gx EDITOR "nvim"\nset -gx PAGER "less"\' > ' .. ctx.out .. '/env.fish'
     })
+    return { out = ctx.out }
   end,
 })
 

@@ -40,20 +40,11 @@ function M.fetch_url(opts)
       url = opts.url,
       sha256 = opts.sha256,
     },
-    outputs = {
-      out = basename,
-    },
-    config = function(inputs, ctx)
+    apply = function(inputs, ctx)
       local result = ctx:fetch_url(inputs.url, inputs.sha256)
-      if sys.os == 'windows' then
-        ctx:cmd({
-          cmd = string.format('move /Y "%s" "%s"', result, ctx.outputs.out),
-        })
-      else
-        ctx:cmd({
-          cmd = string.format('mv -f "%s" "%s"', result, ctx.outputs.out),
-        })
-      end
+      return {
+        out = result,
+      }
     end,
   })
 end

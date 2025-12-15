@@ -218,11 +218,12 @@ User=myapp
 [Install]
 WantedBy=multi-user.target
 ]]
-                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(unit) .. ' > ' .. ctx.outputs.out .. '/myapp.service' })
+                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(unit) .. ' > ' .. ctx.out .. '/myapp.service' })
             elseif sys.os == "macos" then
                 local plist = generate_launchd_plist(o)
-                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(plist) .. ' > ' .. ctx.outputs.out .. '/myapp.plist' })
+                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(plist) .. ' > ' .. ctx.out .. '/myapp.plist' })
             end
+            return { out = ctx.out }
         end,
     })
 
@@ -298,7 +299,8 @@ sys.build({
     end,
     apply = function(o, ctx)
         local archive = ctx:fetch_url(o.url, o.sha256)
-        ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.outputs.out })
+        ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+        return { out = ctx.out }
     end,
 })
 
@@ -321,8 +323,9 @@ sys.build({
             cwd = src,
             env = { PATH = o.rust.outputs.out .. '/bin:' .. os.getenv('PATH') },
         })
-        ctx:cmd({ cmd = 'mkdir -p ' .. ctx.outputs.out .. '/bin' })
-        ctx:cmd({ cmd = 'cp ' .. src .. '/target/release/custom-tool ' .. ctx.outputs.out .. '/bin/custom-tool' })
+        ctx:cmd({ cmd = 'mkdir -p ' .. ctx.out .. '/bin' })
+        ctx:cmd({ cmd = 'cp ' .. src .. '/target/release/custom-tool ' .. ctx.out .. '/bin/custom-tool' })
+        return { out = ctx.out }
     end,
 })
 ```

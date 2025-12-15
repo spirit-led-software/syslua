@@ -122,12 +122,13 @@ Once inputs are resolved, syslua calls `M.setup(inputs)`:
 The manifest is the intermediate representation between Lua config and system state. It contains only the two core primitives:
 
 ```rust
-/// The complete manifest produced by evaluating a Lua configuration
+/// The complete manifest produced by evaluating a Lua configuration.
+/// Keys are 20-char truncated hashes for deduplication.
 pub struct Manifest {
     /// All builds (evaluated build definitions)
-    pub builds: Vec<BuildDef>,
-    /// All binds (evaluated bind definitions, called "activations")
-    pub activations: Vec<BindDef>,
+    pub builds: BTreeMap<BuildHash, BuildDef>,
+    /// All binds (evaluated bind definitions)
+    pub bindings: BTreeMap<BindHash, BindDef>,
 }
 ```
 

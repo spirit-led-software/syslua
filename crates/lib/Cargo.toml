@@ -4,6 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+gix = { version = "0.75", default-features = false, features = [
+  "blocking-network-client",
+  "blocking-http-transport-reqwest-rust-tls",
+  "worktree-mutation",
+  "credentials",
+  "revision",
+] }
 mlua = { version = "0.11", features = ["anyhow", "async", "lua54", "vendored"] }
 sha2 = "0.10"
 

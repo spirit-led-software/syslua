@@ -45,6 +45,9 @@ pub enum Placeholder {
 
   /// `$${bind:<hash>:<output>}` - output from applied bind
   Bind { hash: String, output: String },
+
+  /// `$${out}` - the current build/bind's output directory
+  Out,
 }
 
 /// A segment of parsed text.
@@ -92,6 +95,9 @@ pub trait Resolver {
 
   /// Resolve a bind output by hash and output name.
   fn resolve_bind(&self, hash: &str, output: &str) -> Result<&str, PlaceholderError>;
+
+  /// Resolve the output directory for the current build/bind.
+  fn resolve_out(&self) -> Result<&str, PlaceholderError>;
 }
 
 /// Parse a string containing placeholders into segments.
@@ -101,6 +107,7 @@ pub trait Resolver {
 /// - `$${action:N}` - reference action stdout at index N
 /// - `$${build:HASH:OUTPUT}` - reference build output
 /// - `$${bind:HASH:OUTPUT}` - reference bind output
+/// - `$${out}` - reference the current build/bind's output directory
 ///
 /// # Escaping
 ///
@@ -197,6 +204,11 @@ pub fn parse(input: &str) -> Result<Vec<Segment>, PlaceholderError> {
 
 /// Parse the content inside a placeholder (everything between ${ and }).
 fn parse_placeholder_content(content: &str) -> Result<Placeholder, PlaceholderError> {
+  // Handle special case: "out" has no colon
+  if content == "out" {
+    return Ok(Placeholder::Out);
+  }
+
   // Split by first colon to get the type
   let (kind, rest) = content
     .split_once(':')
@@ -258,6 +270,7 @@ pub fn substitute_segments(segments: &[Segment], resolver: &impl Resolver) -> Re
           Placeholder::Action(index) => resolver.resolve_action(*index)?,
           Placeholder::Build { hash, output } => resolver.resolve_build(hash, output)?,
           Placeholder::Bind { hash, output } => resolver.resolve_bind(hash, output)?,
+          Placeholder::Out => resolver.resolve_out()?,
         };
         result.push_str(value);
       }
@@ -280,6 +293,7 @@ mod tests {
     actions: Vec<String>,
     builds: HashMap<(String, String), String>,
     binds: HashMap<(String, String), String>,
+    out_dir: Option<String>,
   }
 
   impl TestResolver {
@@ -288,6 +302,7 @@ mod tests {
         actions: Vec::new(),
         builds: HashMap::new(),
         binds: HashMap::new(),
+        out_dir: None,
       }
     }
 
@@ -307,6 +322,11 @@ mod tests {
       self
         .binds
         .insert((hash.to_string(), output_name.to_string()), path.to_string());
+      self
+    }
+
+    fn with_out(mut self, out_dir: &str) -> Self {
+      self.out_dir = Some(out_dir.to_string());
       self
     }
   }
@@ -340,6 +360,13 @@ mod tests {
           hash: hash.to_string(),
           output: output.to_string(),
         })
+    }
+
+    fn resolve_out(&self) -> Result<&str, PlaceholderError> {
+      self
+        .out_dir
+        .as_deref()
+        .ok_or(PlaceholderError::Malformed("out directory not set".to_string()))
     }
   }
 
@@ -603,5 +630,60 @@ export PATH=/store/obj/go-1.21.0-go123/bin:/store/obj/rust-1.75.0-rust456/bin:$P
 
     let result = substitute("$${action:0}$${action:1}", &resolver).unwrap();
     assert_eq!(result, "foobar");
+  }
+
+  // ==========================================================================
+  // $${out} Placeholder Tests
+  // ==========================================================================
+
+  #[test]
+  fn parse_out_placeholder() {
+    let segments = parse("$${out}").unwrap();
+    assert_eq!(segments, vec![Segment::Placeholder(Placeholder::Out)]);
+  }
+
+  #[test]
+  fn parse_out_placeholder_in_path() {
+    let segments = parse("$${out}/bin").unwrap();
+    assert_eq!(
+      segments,
+      vec![
+        Segment::Placeholder(Placeholder::Out),
+        Segment::Literal("/bin".to_string()),
+      ]
+    );
+  }
+
+  #[test]
+  fn substitute_out_placeholder() {
+    let resolver = TestResolver::new().with_out("/store/obj/myapp-1.0.0-abc123");
+    let result = substitute("mkdir -p $${out}/bin", &resolver).unwrap();
+    assert_eq!(result, "mkdir -p /store/obj/myapp-1.0.0-abc123/bin");
+  }
+
+  #[test]
+  fn substitute_out_with_other_placeholders() {
+    let resolver = TestResolver::new()
+      .with_out("/store/obj/myapp-1.0.0-abc123")
+      .with_action("/tmp/source.tar.gz");
+
+    let cmd = "tar xf $${action:0} -C $${out}";
+    let result = substitute(cmd, &resolver).unwrap();
+    assert_eq!(result, "tar xf /tmp/source.tar.gz -C /store/obj/myapp-1.0.0-abc123");
+  }
+
+  #[test]
+  fn substitute_out_with_shell_variables() {
+    let resolver = TestResolver::new().with_out("/store/bind/xyz789");
+    let cmd = "ln -sf $HOME/.config/app $${out}/config";
+    let result = substitute(cmd, &resolver).unwrap();
+    assert_eq!(result, "ln -sf $HOME/.config/app /store/bind/xyz789/config");
+  }
+
+  #[test]
+  fn error_unresolved_out() {
+    let resolver = TestResolver::new(); // no out_dir set
+    let result = substitute("$${out}/bin", &resolver);
+    assert!(matches!(result, Err(PlaceholderError::Malformed(_))));
   }
 }

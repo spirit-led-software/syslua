@@ -62,7 +62,7 @@ The bind context provides a single, flexible action for executing system modific
 ```lua
 ---@class BindCtx
 
--- Execute a command, returns placeholder "${action:N}"
+-- Execute a command, returns an opaque reference to stdout
 ---@field cmd fun(opts: BindCmdOptions): string
 ```
 
@@ -99,14 +99,13 @@ ctx:cmd({
 
 ## Rust Types
 
-The bind system uses a three-tier type architecture:
+The bind system uses a two-tier type architecture:
 
 - **Spec** - Lua-side, contains closures, not serializable
-- **Def** - Evaluated, serializable, stored in Manifest
-- **Ref** - Content-addressed reference for cross-references
+- **Def** - Evaluated, serializable, stored in Manifest (keyed by truncated hash)
 
 ```rust
-/// Hash for content-addressing binds
+/// Hash for content-addressing binds (20-char truncated SHA-256)
 pub struct BindHash(pub String);
 
 /// Actions that can be performed during a bind
@@ -133,11 +132,9 @@ pub struct BindDef {
     pub destroy_actions: Option<Vec<BindAction>>,
 }
 
-/// Content-addressed reference (for cross-references in inputs)
-pub struct BindRef {
-    pub inputs: Option<InputsRef>,
-    pub outputs: Option<HashMap<String, String>>,
-    pub hash: BindHash,
+impl BindDef {
+    /// Compute the truncated hash for use as manifest key.
+    pub fn compute_hash(&self) -> Result<BindHash, serde_json::Error>;
 }
 
 /// Bind context provided to apply/destroy functions
@@ -146,7 +143,8 @@ pub struct BindCtx {
 }
 
 impl BindCtx {
-    /// Execute a command, returns placeholder "${action:N}"
+    /// Execute a command, returns an opaque reference
+    /// that resolves to stdout at execution time
     pub fn cmd(&mut self, opts: impl Into<BindCmdOptions>) -> String;
     
     /// Consume context and return accumulated actions
@@ -161,25 +159,26 @@ pub struct BindCmdOptions {
 }
 ```
 
+Note: `BindRef` is not a separate Rust struct - it's a Lua table with a metatable that provides the bind's `hash`, `inputs`, and `outputs` fields.
+
 ### Placeholder System
 
-The `cmd` method returns a placeholder string that references the action's stdout:
-
-- `${action:N}` - stdout of action at index N within the same bind
-
-This allows destroy actions to reference values captured during apply:
+The `cmd` method returns an opaque string that can be stored and used later. This allows destroy actions to reference values captured during apply:
 
 ```lua
 apply = function(inputs, ctx)
+  -- cmd returns an opaque reference to the command's stdout
   local container_id = ctx:cmd("docker run -d postgres")
-  -- container_id is "${action:0}", stored in outputs
+  -- Return it as an output so destroy can access it
   return { container = container_id }
 end,
 destroy = function(inputs, ctx)
-  -- inputs.container resolves to the actual container ID
+  -- inputs.container resolves to the actual container ID at runtime
   ctx:cmd("docker stop " .. inputs.container)
 end
 ```
+
+**Important:** Users never write placeholder syntax directly. The return values from context methods handle this automatically. Shell variables like `$HOME` work normally in command strings.
 
 ## How User APIs Map to Builds + Binds
 
@@ -393,9 +392,10 @@ pub struct Snapshot {
     pub manifest: Manifest,
 }
 
+/// Manifest keyed by truncated hash (20 chars)
 pub struct Manifest {
-    pub builds: Vec<BuildDef>,
-    pub activations: Vec<BindDef>,  // Evaluated binds
+    pub builds: BTreeMap<BuildHash, BuildDef>,
+    pub bindings: BTreeMap<BindHash, BindDef>,
 }
 ```
 

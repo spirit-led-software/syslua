@@ -18,6 +18,10 @@ use crate::lua::outputs::parse_outputs;
 use crate::manifest::Manifest;
 
 impl LuaUserData for BindCtx {
+  fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+    fields.add_field_method_get("out", |_, this| Ok(this.out().to_string()));
+  }
+
   fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
     methods.add_method_mut("cmd", |_, this, opts: LuaValue| {
       let cmd_opts = parse_cmd_opts(opts)?;
@@ -615,6 +619,115 @@ mod tests {
       // inputs should be nil, not an empty table
       let inputs: LuaValue = result.get("inputs")?;
       assert_eq!(inputs, LuaValue::Nil);
+
+      Ok(())
+    }
+
+    #[test]
+    fn ctx_out_returns_placeholder() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      // Test that ctx.out returns the $${out} placeholder
+      let result: LuaTable = lua
+        .load(
+          r#"
+                return sys.bind({
+                    apply = function(inputs, ctx)
+                        -- ctx.out should return $${out} placeholder
+                        ctx:cmd("mkdir -p " .. ctx.out)
+                        return { out = ctx.out }
+                    end,
+                })
+            "#,
+        )
+        .eval()?;
+
+      let outputs: LuaTable = result.get("outputs")?;
+      let out: String = outputs.get("out")?;
+
+      // The output value should contain the bind placeholder (resolved from ctx.out)
+      // Since ctx.out returns "$${out}" and that's returned as the output value,
+      // the final placeholder wraps it as $${bind:HASH:out}
+      let hash: String = result.get("hash")?;
+      assert_eq!(out, format!("$${{bind:{}:out}}", hash));
+
+      Ok(())
+    }
+
+    #[test]
+    fn ctx_out_can_be_used_in_commands() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      lua
+        .load(
+          r#"
+                sys.bind({
+                    apply = function(inputs, ctx)
+                        ctx:cmd("mkdir -p " .. ctx.out)
+                        ctx:cmd("ln -sf /src " .. ctx.out .. "/link")
+                    end,
+                })
+            "#,
+        )
+        .exec()?;
+
+      let manifest = manifest.borrow();
+      let (_, bind_def) = manifest.bindings.iter().next().unwrap();
+
+      // Check that the commands contain the $${out} placeholder
+      assert_eq!(bind_def.apply_actions.len(), 2);
+
+      use crate::bind::BindAction;
+      match &bind_def.apply_actions[0] {
+        BindAction::Cmd { cmd, .. } => {
+          assert!(cmd.contains("$${out}"), "cmd should contain ${{out}} placeholder: {}", cmd);
+          assert_eq!(cmd, "mkdir -p $${out}");
+        }
+      }
+
+      match &bind_def.apply_actions[1] {
+        BindAction::Cmd { cmd, .. } => {
+          assert!(cmd.contains("$${out}"), "cmd should contain ${{out}} placeholder: {}", cmd);
+          assert_eq!(cmd, "ln -sf /src $${out}/link");
+        }
+      }
+
+      Ok(())
+    }
+
+    #[test]
+    fn ctx_out_can_be_used_in_destroy() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      lua
+        .load(
+          r#"
+                sys.bind({
+                    apply = function(inputs, ctx)
+                        ctx:cmd("mkdir -p " .. ctx.out)
+                    end,
+                    destroy = function(inputs, ctx)
+                        ctx:cmd("rm -rf " .. ctx.out)
+                    end,
+                })
+            "#,
+        )
+        .exec()?;
+
+      let manifest = manifest.borrow();
+      let (_, bind_def) = manifest.bindings.iter().next().unwrap();
+
+      // Check that destroy commands also contain the $${out} placeholder
+      let destroy_actions = bind_def.destroy_actions.as_ref().expect("should have destroy actions");
+      assert_eq!(destroy_actions.len(), 1);
+
+      use crate::bind::BindAction;
+      match &destroy_actions[0] {
+        BindAction::Cmd { cmd, .. } => {
+          assert!(cmd.contains("$${out}"), "destroy cmd should contain ${{out}} placeholder: {}", cmd);
+          assert_eq!(cmd, "rm -rf $${out}");
+        }
+      }
 
       Ok(())
     }

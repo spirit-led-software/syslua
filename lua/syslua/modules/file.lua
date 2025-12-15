@@ -32,7 +32,7 @@ M.setup = function(opts)
         content = opts.content,
         mutable = mutable,
       },
-      config = function(inputs, ctx)
+      apply = function(inputs, ctx)
         if opts.source then
           if sys.os == 'windows' then
             ctx:cmd({
@@ -51,32 +51,34 @@ M.setup = function(opts)
       end,
     })
   else
+    local basename = sys.path.basename(opts.target)
     local build = sys.build({
-      name = sys.path.basename(opts.target) .. '_bld',
-      outputs = {
-        out = sys.path.basename(opts.target),
-      },
+      name = basename .. '_bld',
       inputs = {
         source = opts.source,
         content = opts.content,
         mutable = mutable,
       },
-      config = function(inputs, ctx)
+      apply = function(inputs, ctx)
         if inputs.source then
           if sys.os == 'windows' then
             ctx:cmd({
-              cmd = string.format('xcopy /E /I /Y "%s" "%s"', inputs.source, ctx.outputs.out),
+              cmd = string.format('xcopy /E /I /Y "%s" "%s"', inputs.source, basename),
             })
           else
             ctx:cmd({
-              cmd = string.format('cp -r "%s" "%s"', inputs.source, ctx.outputs.out),
+              cmd = string.format('cp -r "%s" "%s"', inputs.source, basename),
             })
           end
         else
           ctx:cmd({
-            cmd = string.format('echo "%s" > "%s"', inputs.content, ctx.outputs.out),
+            cmd = string.format('echo "%s" > "%s"', inputs.content, basename),
           })
         end
+
+        return {
+          out = basename,
+        }
       end,
     })
 
@@ -85,7 +87,7 @@ M.setup = function(opts)
         build = build,
         target = opts.target,
       },
-      config = function(inputs, ctx)
+      apply = function(inputs, ctx)
         if sys.os == 'windows' then
           ctx:cmd({
             cmd = string.format(
@@ -93,12 +95,21 @@ M.setup = function(opts)
               inputs.target,
               inputs.build.outputs.out
             ),
-            undo_cmd = string.format('Remove-Item -Path "%s"', inputs.target),
           })
         else
           ctx:cmd({
             cmd = string.format('ln -s "%s" "%s"', inputs.build.outputs.out, inputs.target),
-            undo_cmd = string.format('rm "%s"', inputs.target),
+          })
+        end
+      end,
+      destroy = function(_, ctx)
+        if sys.os == 'windows' then
+          ctx:cmd({
+            cmd = string.format('Remove-Item -Path "%s" -Recurse -Force', opts.target),
+          })
+        else
+          ctx:cmd({
+            cmd = string.format('rm -rf "%s"', opts.target),
           })
         end
       end,

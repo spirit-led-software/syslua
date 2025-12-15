@@ -244,8 +244,8 @@ sys = {}
 
 ---@class BuildCtx
 ---@field outputs table<string, string> Output paths
----@field fetch_url fun(self: BuildCtx, url: string, sha256: string): string
----@field cmd fun(self: BuildCtx, opts: BuildCmdOptions|string): nil
+---@field fetch_url fun(self: BuildCtx, url: string, sha256: string): string Returns opaque reference to downloaded file
+---@field cmd fun(self: BuildCtx, opts: BuildCmdOptions|string): string Returns opaque reference to stdout
 
 ---@class BuildCmdOptions
 ---@field cmd string Command to execute
@@ -258,7 +258,7 @@ sys = {}
 ---@field destroy? fun(inputs: table, ctx: BindCtx): nil Optional: destroy logic for rollback
 
 ---@class BindCtx
----@field cmd fun(self: BindCtx, opts: BindCmdOptions|string): string Returns "${action:N}" placeholder
+---@field cmd fun(self: BindCtx, opts: BindCmdOptions|string): string Returns opaque reference to stdout
 
 ---@class BindCmdOptions
 ---@field cmd string Command to execute
@@ -386,7 +386,8 @@ sys.build({
   apply = function(inputs, ctx)
     -- ctx provides build operations
     local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-    ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.outputs.out })
+    ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+    return { out = ctx.out }
   end,
 })
 ```

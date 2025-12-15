@@ -22,7 +22,7 @@ M.inputs = {
 
 -- Configure your system
 function M.setup(inputs)
-    local pkgs = require("inputs.pkgs")
+    local pkgs = require("pkgs")
     local lib = require("syslua.lib")
 
     -- Install packages

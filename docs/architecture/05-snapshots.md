@@ -31,12 +31,13 @@ pub struct Snapshot {
 }
 
 /// The manifest contains evaluated build and bind definitions.
+/// Keys are 20-char truncated hashes for deduplication.
 pub struct Manifest {
-    /// All build definitions
-    pub builds: Vec<BuildDef>,
+    /// All build definitions, keyed by BuildHash
+    pub builds: BTreeMap<BuildHash, BuildDef>,
 
-    /// All bind definitions (called "activations")
-    pub activations: Vec<BindDef>,
+    /// All bind definitions, keyed by BindHash
+    pub bindings: BTreeMap<BindHash, BindDef>,
 }
 
 /// An evaluated bind definition (serializable).
@@ -67,9 +68,9 @@ pub enum BindAction {
 │   └── ...
 └── store/
     └── obj/                    # Build outputs (immutable, content-addressed)
-        ├── ripgrep-15.1.0-abc123/
-        ├── file-gitconfig-def456/
-        └── env-editor-ghi789/
+        ├── ripgrep-15.1.0-abc123def456789012/  # 20-char hash
+        ├── file-gitconfig-def456abc123789012/
+        └── env-editor-ghi789abc123456012/
 ```
 
 ### Metadata Index

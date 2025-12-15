@@ -74,8 +74,9 @@ function M.setup(opts)
         inputs = function() return opts end,
         apply = function(o, ctx)
             ctx:cmd({
-                cmd = 'echo "worker_processes ' .. o.workers .. ';" > ' .. ctx.outputs.out .. '/nginx.conf'
+                cmd = 'echo "worker_processes ' .. o.workers .. ';" > ' .. ctx.out .. '/nginx.conf'
             })
+            return { out = ctx.out }
         end,
     })
     
@@ -129,7 +130,8 @@ function M.setup(opts)
         end,
         apply = function(o, ctx)
             local archive = ctx:fetch_url(o.url, o.sha256)
-            ctx:cmd({ cmd = "tar -xzf " .. archive .. " -C " .. ctx.outputs.out })
+            ctx:cmd({ cmd = "tar -xzf " .. archive .. " -C " .. ctx.out })
+            return { out = ctx.out }
         end,
     })
     
@@ -176,7 +178,8 @@ http {
     server { listen %d; }
 }
 ]], o.workers, o.port)
-            ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(conf) .. ' > ' .. ctx.outputs.out .. '/nginx.conf' })
+            ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(conf) .. ' > ' .. ctx.out .. '/nginx.conf' })
+            return { out = ctx.out }
         end,
     })
     
@@ -193,11 +196,12 @@ ExecStart=/usr/sbin/nginx -c ]] .. o.config_path.outputs.out .. [[/nginx.conf
 [Install]
 WantedBy=multi-user.target
 ]]
-                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(unit) .. ' > ' .. ctx.outputs.out .. '/nginx.service' })
+                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(unit) .. ' > ' .. ctx.out .. '/nginx.service' })
             elseif sys.os == "macos" then
                 local plist = generate_launchd_plist(o)
-                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(plist) .. ' > ' .. ctx.outputs.out .. '/nginx.plist' })
+                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(plist) .. ' > ' .. ctx.out .. '/nginx.plist' })
             end
+            return { out = ctx.out }
         end,
     })
     
@@ -255,7 +259,8 @@ function M.setup(opts)
         end,
         apply = function(o, ctx)
             local archive = ctx:fetch_url(o.url, o.sha256)
-            ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.outputs.out })
+            ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+            return { out = ctx.out }
         end,
     })
     
@@ -263,7 +268,8 @@ function M.setup(opts)
         name = "vscode-settings",
         inputs = function() return { settings = opts.settings } end,
         apply = function(o, ctx)
-            ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(lib.toJSON(o.settings)) .. ' > ' .. ctx.outputs.out .. '/settings.json' })
+            ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(lib.toJSON(o.settings)) .. ' > ' .. ctx.out .. '/settings.json' })
+            return { out = ctx.out }
         end,
     })
     

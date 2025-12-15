@@ -73,8 +73,8 @@ Both builds and binds use a flexible `cmd` action for executing platform-specifi
 sys.build({
   name = "my-tool",
   apply = function(inputs, ctx)
-    ctx:cmd({ cmd = "make", cwd = "/build" })
-    ctx:cmd({ cmd = "make install", env = { PREFIX = ctx.outputs.out } })
+    local build_dir = ctx:cmd({ cmd = "make", cwd = "/build" })
+    ctx:cmd({ cmd = "make install", env = { PREFIX = build_dir } })
   end,
 })
 
@@ -110,7 +110,7 @@ The Rust implementation is intentionally minimal, covering:
 | **Build**      | Immutable description of how to produce store content            |
 | **Bind**       | Description of what to do with build output                      |
 | **Store**      | Global, immutable location for package content (`/syslua/store`) |
-| **Store Object** | Content-addressed directory in `store/obj/<hash>/`             |
+| **Store Object** | Content-addressed directory in `store/obj/<name>-<hash>/` (20-char truncated hash) |
 | **Manifest**   | Intermediate representation from evaluating Lua config           |
 | **Snapshot**   | Point-in-time capture of builds + binds                          |
 | **Input**      | Declared source of packages (GitHub repo, local path, Git URL)   |
@@ -150,8 +150,8 @@ The Rust implementation is intentionally minimal, covering:
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   Immutable Store                        │
-│  obj/<name>-<hash>/   Content-addressed objects         │
-│  pkg/<name>/<ver>/    Human-readable symlinks           │
+│  obj/<name>-<hash>/   Content-addressed objects (20-char hash) │
+│  bind/<hash>/         Bind state tracking (20-char hash)       │
 └─────────────────────────────────────────────────────────┘
 ```
 

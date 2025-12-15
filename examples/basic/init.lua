@@ -17,6 +17,7 @@ return {
     file.setup({
       target = path.resolve(path.join(os.getenv('HOME'), '.ssh')),
       source = path.resolve(path.join(__dir, '..', 'dotfiles', '.ssh')), -- config living alongside this init.lua
+      mutable = true,
     })
   end,
 }
