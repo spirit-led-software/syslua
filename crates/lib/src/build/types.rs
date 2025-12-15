@@ -1,10 +1,14 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use mlua::Function;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::types::{InputsRef, InputsSpec};
+use crate::consts::HASH_PREFIX_LEN;
+use crate::inputs::{InputsRef, InputsSpec};
+
+/// Marker type name for BuildRef metatables.
+pub const BUILD_REF_TYPE: &str = "BuildRef";
 
 pub struct BuildSpec {
   pub name: String,
@@ -13,7 +17,7 @@ pub struct BuildSpec {
   pub apply: Function,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BuildHash(pub String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -40,11 +44,13 @@ pub struct BuildDef {
 }
 
 impl BuildDef {
+  /// Compute the truncated hash for use as manifest key.
   pub fn compute_hash(&self) -> Result<BuildHash, serde_json::Error> {
     let serialized = serde_json::to_string(self)?;
     let mut hasher = Sha256::new();
     hasher.update(serialized.as_bytes());
-    Ok(BuildHash(format!("{:x}", hasher.finalize())))
+    let full = format!("{:x}", hasher.finalize());
+    Ok(BuildHash(full[..HASH_PREFIX_LEN].to_string()))
   }
 }
 
@@ -91,7 +97,7 @@ impl BuildCtx {
   }
 
   pub fn fetch_url(&mut self, url: &str, sha256: &str) -> String {
-    let output = format!("${{action:{}}}", self.actions.len());
+    let output = format!("$${{action:{}}}", self.actions.len());
     self.actions.push(BuildAction::FetchUrl {
       url: url.to_string(),
       sha256: sha256.to_string(),
@@ -100,7 +106,7 @@ impl BuildCtx {
   }
 
   pub fn cmd(&mut self, opts: impl Into<BuildCmdOptions>) -> String {
-    let output = format!("${{action:{}}}", self.actions.len());
+    let output = format!("$${{action:{}}}", self.actions.len());
     let opts = opts.into();
     self.actions.push(BuildAction::Cmd {
       cmd: opts.cmd,
@@ -113,15 +119,6 @@ impl BuildCtx {
   pub fn into_actions(self) -> Vec<BuildAction> {
     self.actions
   }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BuildRef {
-  pub name: String,
-  pub version: Option<String>,
-  pub inputs: Option<InputsRef>,
-  pub outputs: HashMap<String, String>,
-  pub hash: BuildHash,
 }
 
 #[cfg(test)]
@@ -152,6 +149,13 @@ mod tests {
       let hash2 = def.compute_hash().unwrap();
 
       assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn hash_is_truncated() {
+      let def = simple_def();
+      let hash = def.compute_hash().unwrap();
+      assert_eq!(hash.0.len(), HASH_PREFIX_LEN);
     }
 
     #[test]
@@ -243,7 +247,7 @@ mod tests {
             cwd: Some("/build".to_string()),
           },
         ],
-        outputs: Some(BTreeMap::from([("out".to_string(), "${action:1}".to_string())])),
+        outputs: Some(BTreeMap::from([("out".to_string(), "$${action:1}".to_string())])),
       };
 
       let json = serde_json::to_string(&def).unwrap();
@@ -265,9 +269,9 @@ mod tests {
       let p2 = ctx.fetch_url("https://example.com/b.tar.gz", "hash2");
 
       // All actions use the same placeholder format with sequential indices
-      assert_eq!(p0, "${action:0}");
-      assert_eq!(p1, "${action:1}");
-      assert_eq!(p2, "${action:2}");
+      assert_eq!(p0, "$${action:0}");
+      assert_eq!(p1, "$${action:1}");
+      assert_eq!(p2, "$${action:2}");
     }
 
     #[test]

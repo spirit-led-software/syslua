@@ -3,6 +3,17 @@ pub mod store;
 use crate::consts::APP_NAME;
 use std::path::PathBuf;
 
+#[cfg(windows)]
+pub fn root_dir() -> PathBuf {
+  let drive = std::env::var("SYSTEMDRIVE").expect("SYSTEMDRIVE not set");
+  PathBuf::from(drive).join(APP_NAME)
+}
+
+#[cfg(not(windows))]
+pub fn root_dir() -> PathBuf {
+  PathBuf::from("/").join(APP_NAME)
+}
+
 /// Returns the user's home directory
 #[cfg(windows)]
 pub fn home_dir() -> PathBuf {

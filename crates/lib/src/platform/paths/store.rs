@@ -1,6 +1,6 @@
-use crate::consts::APP_NAME;
-use crate::platform::paths::data_dir;
 use std::path::PathBuf;
+
+use super::{data_dir, root_dir};
 
 pub struct StorePaths {
   pub system: PathBuf,
@@ -23,15 +23,8 @@ impl StorePaths {
     Self::default_system_store_path()
   }
 
-  #[cfg(windows)]
   pub fn default_system_store_path() -> PathBuf {
-    let drive = std::env::var("SYSTEMDRIVE").expect("SYSTEMDRIVE not set");
-    PathBuf::from(drive).join(APP_NAME).join("store")
-  }
-
-  #[cfg(not(windows))]
-  pub fn default_system_store_path() -> PathBuf {
-    PathBuf::from("/").join(APP_NAME).join("store")
+    root_dir().join("store")
   }
 
   pub fn user_store_path() -> PathBuf {
@@ -74,6 +67,6 @@ mod tests {
   #[cfg(not(windows))]
   fn default_system_store_at_root() {
     let path = StorePaths::default_system_store_path();
-    assert_eq!(path, PathBuf::from("/").join(APP_NAME).join("store"));
+    assert_eq!(path, root_dir().join("store"));
   }
 }

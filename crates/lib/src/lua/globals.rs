@@ -4,19 +4,26 @@
 //! - `sys.platform` - Platform triple (e.g., "aarch64-darwin")
 //! - `sys.os` - Operating system name (e.g., "darwin", "linux", "windows")
 //! - `sys.arch` - CPU architecture (e.g., "x86_64", "aarch64")
-//! - `sys.version` - syslua version string
 //! - `sys.path` - Path manipulation utilities
+//! - `sys.build{}` - Define a build
+//! - `sys.bind{}` - Define a bind
+
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use mlua::prelude::*;
 
+use super::bind::register_sys_bind;
+use super::build::register_sys_build;
 use super::helpers;
+use crate::manifest::Manifest;
 use crate::platform::Platform;
 
 /// Register the `sys` global table in the Lua runtime.
 ///
-/// This function creates the `sys` table with platform information and utilities,
-/// making it available as a global in Lua scripts.
-pub fn register_globals(lua: &Lua) -> LuaResult<()> {
+/// This function creates the `sys` table with platform information, utilities,
+/// and the `sys.build{}` and `sys.bind{}` functions, making it available as a global in Lua scripts.
+pub fn register_globals(lua: &Lua, manifest: Rc<RefCell<Manifest>>) -> LuaResult<()> {
   let sys = lua.create_table()?;
 
   // Platform information
@@ -30,6 +37,12 @@ pub fn register_globals(lua: &Lua) -> LuaResult<()> {
   let path = helpers::path::create_path_helpers(lua)?;
   sys.set("path", path)?;
 
+  // Register sys.build{}
+  register_sys_build(lua, &sys, manifest.clone())?;
+
+  // Register sys.bind{}
+  register_sys_bind(lua, &sys, manifest)?;
+
   // Register as global
   lua.globals().set("sys", sys)?;
 
@@ -42,7 +55,8 @@ mod tests {
 
   fn create_test_lua() -> LuaResult<Lua> {
     let lua = Lua::new();
-    register_globals(&lua)?;
+    let manifest = Rc::new(RefCell::new(Manifest::default()));
+    register_globals(&lua, manifest)?;
     Ok(lua)
   }
 
@@ -56,8 +70,9 @@ mod tests {
       assert!(sys.contains_key("platform")?);
       assert!(sys.contains_key("os")?);
       assert!(sys.contains_key("arch")?);
-      assert!(sys.contains_key("version")?);
       assert!(sys.contains_key("path")?);
+      assert!(sys.contains_key("build")?);
+      assert!(sys.contains_key("bind")?);
       Ok(())
     }
 
@@ -110,32 +125,6 @@ mod tests {
         platform,
         arch
       );
-      Ok(())
-    }
-
-    #[test]
-    fn version_is_semver() -> LuaResult<()> {
-      let lua = create_test_lua()?;
-      let version: String = lua.load("return sys.version").eval()?;
-
-      // Should match semver pattern (at least x.y.z)
-      let parts: Vec<&str> = version.split('.').collect();
-      assert!(
-        parts.len() >= 2,
-        "Version should have at least major.minor: {}",
-        version
-      );
-
-      // Each part should be numeric (at least the first two)
-      for (i, part) in parts.iter().take(2).enumerate() {
-        assert!(
-          part.parse::<u32>().is_ok(),
-          "Version part {} should be numeric: {}",
-          i,
-          part
-        );
-      }
-
       Ok(())
     }
   }

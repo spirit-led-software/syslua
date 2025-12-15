@@ -1,10 +1,14 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use mlua::Function;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::types::{InputsRef, InputsSpec};
+use crate::consts::HASH_PREFIX_LEN;
+use crate::inputs::{InputsRef, InputsSpec};
+
+/// Marker type name for BindRef metatables.
+pub const BIND_REF_TYPE: &str = "BindRef";
 
 /// The bind specification as defined in Lua.
 pub struct BindSpec {
@@ -13,7 +17,7 @@ pub struct BindSpec {
   pub destroy: Option<Function>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BindHash(pub String);
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,11 +38,13 @@ pub struct BindDef {
 }
 
 impl BindDef {
+  /// Compute the truncated hash for use as manifest key.
   pub fn compute_hash(&self) -> Result<BindHash, serde_json::Error> {
     let serialized = serde_json::to_string(self)?;
     let mut hasher = Sha256::new();
     hasher.update(serialized.as_bytes());
-    Ok(BindHash(format!("{:x}", hasher.finalize())))
+    let full = format!("{:x}", hasher.finalize());
+    Ok(BindHash(full[..HASH_PREFIX_LEN].to_string()))
   }
 }
 
@@ -85,7 +91,7 @@ impl BindCtx {
   }
 
   pub fn cmd(&mut self, opts: impl Into<BindCmdOptions>) -> String {
-    let output = format!("${{action:{}}}", self.actions.len());
+    let output = format!("$${{action:{}}}", self.actions.len());
     let opts = opts.into();
     self.actions.push(BindAction::Cmd {
       cmd: opts.cmd,
@@ -98,13 +104,6 @@ impl BindCtx {
   pub fn into_actions(self) -> Vec<BindAction> {
     self.actions
   }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct BindRef {
-  pub inputs: Option<InputsRef>,
-  pub outputs: Option<HashMap<String, String>>,
-  pub hash: BindHash,
 }
 
 #[cfg(test)]
@@ -135,6 +134,13 @@ mod tests {
       let hash2 = def.compute_hash().unwrap();
 
       assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn hash_is_truncated() {
+      let def = simple_def();
+      let hash = def.compute_hash().unwrap();
+      assert_eq!(hash.0.len(), HASH_PREFIX_LEN);
     }
 
     #[test]
@@ -220,7 +226,7 @@ mod tests {
           env: Some(env),
           cwd: Some("/home".to_string()),
         }],
-        outputs: Some(BTreeMap::from([("link".to_string(), "${action:0}".to_string())])),
+        outputs: Some(BTreeMap::from([("link".to_string(), "$${action:0}".to_string())])),
         destroy_actions: Some(vec![BindAction::Cmd {
           cmd: "rm /dest".to_string(),
           env: None,
@@ -246,9 +252,9 @@ mod tests {
       let p1 = ctx.cmd("step2");
       let p2 = ctx.cmd("step3");
 
-      assert_eq!(p0, "${action:0}");
-      assert_eq!(p1, "${action:1}");
-      assert_eq!(p2, "${action:2}");
+      assert_eq!(p0, "$${action:0}");
+      assert_eq!(p1, "$${action:1}");
+      assert_eq!(p2, "$${action:2}");
     }
 
     #[test]
@@ -277,37 +283,6 @@ mod tests {
           assert_eq!(cwd, &Some("/home".to_string()));
         }
       }
-    }
-  }
-
-  mod bind_ref {
-    use super::*;
-
-    #[test]
-    fn serialization_roundtrip_with_nested_inputs() {
-      // BindRef with nested InputsRef containing a BuildRef - tests the
-      // cross-reference capability that's central to the type system
-      let build_ref = crate::build::BuildRef {
-        name: "source".to_string(),
-        version: Some("1.0.0".to_string()),
-        inputs: None,
-        outputs: HashMap::from([("out".to_string(), "/store/obj/source-abc123".to_string())]),
-        hash: crate::build::BuildHash("abc123".to_string()),
-      };
-
-      let bind_ref = BindRef {
-        inputs: Some(InputsRef::Build(Box::new(build_ref))),
-        outputs: Some(HashMap::from([(
-          "link".to_string(),
-          "/home/user/.config/app".to_string(),
-        )])),
-        hash: BindHash("def456".to_string()),
-      };
-
-      let json = serde_json::to_string(&bind_ref).unwrap();
-      let deserialized: BindRef = serde_json::from_str(&json).unwrap();
-
-      assert_eq!(bind_ref, deserialized);
     }
   }
 }

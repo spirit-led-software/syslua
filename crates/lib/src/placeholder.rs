@@ -6,21 +6,26 @@
 //!
 //! # Placeholder Formats
 //!
-//! - `${action:N}` - stdout of action at index N within the same spec
-//! - `${build:<hash>:<output>}` - output from a realized build
-//! - `${bind:<hash>:<output>}` - output from an applied bind
+//! - `$${action:N}` - stdout of action at index N within the same spec
+//! - `$${build:<hash>:<output>}` - output from a realized build
+//! - `$${bind:<hash>:<output>}` - output from an applied bind
+//!
+//! # Shell Variables
+//!
+//! Single `$` characters pass through unchanged, so shell variables like
+//! `$HOME` and `$PATH` work naturally without any escaping.
 //!
 //! # Escaping
 //!
-//! Use `$$` to produce a literal `$` character. This is needed when commands
-//! contain shell variables like `$HOME` that shouldn't be interpreted.
+//! Use `$$$` before `{` to produce a literal `$${` sequence. This is only
+//! needed in the rare case where you want literal `$${` in output.
 //!
 //! # Example
 //!
 //! ```
 //! use syslua_lib::placeholder::{parse, Segment, Placeholder};
 //!
-//! let segments = parse("${action:0}/bin:$$HOME").unwrap();
+//! let segments = parse("$${action:0}/bin:$HOME").unwrap();
 //! assert_eq!(segments, vec![
 //!     Segment::Placeholder(Placeholder::Action(0)),
 //!     Segment::Literal("/bin:$HOME".to_string()),
@@ -32,13 +37,13 @@ use thiserror::Error;
 /// A parsed placeholder reference.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Placeholder {
-  /// `${action:N}` - stdout of action at index N
+  /// `$${action:N}` - stdout of action at index N
   Action(usize),
 
-  /// `${build:<hash>:<output>}` - output from realized build
+  /// `$${build:<hash>:<output>}` - output from realized build
   Build { hash: String, output: String },
 
-  /// `${bind:<hash>:<output>}` - output from applied bind
+  /// `$${bind:<hash>:<output>}` - output from applied bind
   Bind { hash: String, output: String },
 }
 
@@ -93,13 +98,15 @@ pub trait Resolver {
 ///
 /// # Placeholder Formats
 ///
-/// - `${action:N}` - reference action stdout at index N
-/// - `${build:HASH:OUTPUT}` - reference build output
-/// - `${bind:HASH:OUTPUT}` - reference bind output
+/// - `$${action:N}` - reference action stdout at index N
+/// - `$${build:HASH:OUTPUT}` - reference build output
+/// - `$${bind:HASH:OUTPUT}` - reference bind output
 ///
 /// # Escaping
 ///
-/// `$$` produces a literal `$` character.
+/// Use `$$$` before `{` to produce a literal `$$` followed by `{`.
+/// Single `$` characters pass through unchanged, so shell variables
+/// like `$HOME` work naturally without escaping.
 ///
 /// # Errors
 ///
@@ -111,44 +118,67 @@ pub fn parse(input: &str) -> Result<Vec<Segment>, PlaceholderError> {
 
   while let Some((pos, ch)) = chars.next() {
     if ch == '$' {
-      // Check what follows the $
+      // Check what follows the first $
       match chars.peek() {
         Some((_, '$')) => {
-          // Escaped dollar: $$ -> $
-          literal.push('$');
+          // We have "$$", check what follows
           chars.next(); // consume the second $
-        }
-        Some((_, '{')) => {
-          // Start of placeholder
-          chars.next(); // consume the {
 
-          // Flush accumulated literal
-          if !literal.is_empty() {
-            segments.push(Segment::Literal(std::mem::take(&mut literal)));
-          }
+          match chars.peek() {
+            Some((_, '$')) => {
+              // We have "$$$", check if next is "{"
+              // This is the escape sequence: $$$ + { -> $$ + {
+              chars.next(); // consume the third $
 
-          // Find the closing brace
-          let mut placeholder_content = String::new();
-          let mut found_close = false;
-
-          for (_, c) in chars.by_ref() {
-            if c == '}' {
-              found_close = true;
-              break;
+              match chars.peek() {
+                Some((_, '{')) => {
+                  // Escaped: $$${ -> $${ (literal)
+                  literal.push_str("$${");
+                  chars.next(); // consume the {
+                }
+                _ => {
+                  // Just "$$$" followed by something else, output as literal
+                  literal.push_str("$$$");
+                }
+              }
             }
-            placeholder_content.push(c);
-          }
+            Some((_, '{')) => {
+              // We have "$${" - this is a placeholder
+              chars.next(); // consume the {
 
-          if !found_close {
-            return Err(PlaceholderError::Unclosed(pos));
-          }
+              // Flush accumulated literal
+              if !literal.is_empty() {
+                segments.push(Segment::Literal(std::mem::take(&mut literal)));
+              }
 
-          // Parse the placeholder content
-          let placeholder = parse_placeholder_content(&placeholder_content)?;
-          segments.push(Segment::Placeholder(placeholder));
+              // Find the closing brace
+              let mut placeholder_content = String::new();
+              let mut found_close = false;
+
+              for (_, c) in chars.by_ref() {
+                if c == '}' {
+                  found_close = true;
+                  break;
+                }
+                placeholder_content.push(c);
+              }
+
+              if !found_close {
+                return Err(PlaceholderError::Unclosed(pos));
+              }
+
+              // Parse the placeholder content
+              let placeholder = parse_placeholder_content(&placeholder_content)?;
+              segments.push(Segment::Placeholder(placeholder));
+            }
+            _ => {
+              // Just "$$" followed by something other than $ or {, output as literal
+              literal.push_str("$$");
+            }
+          }
         }
         _ => {
-          // Just a lone $, treat as literal
+          // Just a lone $, treat as literal (shell variables like $HOME pass through)
           literal.push('$');
         }
       }
@@ -320,11 +350,11 @@ mod tests {
   #[test]
   fn build_script_tar_extraction() {
     // Simulates: fetch a tarball, then extract it
-    // ctx.fetch_url(...) returns ${action:0}
-    // ctx.cmd("tar xf ${action:0} -C /build") uses that output
+    // ctx.fetch_url(...) returns $${action:0}
+    // ctx.cmd("tar xf $${action:0} -C /build") uses that output
     let resolver = TestResolver::new().with_action("/tmp/ripgrep-14.1.0.tar.gz");
 
-    let cmd = "tar xf ${action:0} -C /build && cd /build && make install";
+    let cmd = "tar xf $${action:0} -C /build && cd /build && make install";
     let result = substitute(cmd, &resolver).unwrap();
 
     assert_eq!(
@@ -336,12 +366,12 @@ mod tests {
   #[test]
   fn path_construction_multiple_builds() {
     // Simulates: constructing PATH from multiple build outputs
-    // PATH=${build:ripgrep:out}/bin:${build:fd:out}/bin:$PATH
+    // PATH=$${build:ripgrep:out}/bin:$${build:fd:out}/bin:$PATH
     let resolver = TestResolver::new()
       .with_build("a1b2c3", "out", "/store/obj/ripgrep-14.1.0-a1b2c3")
       .with_build("d4e5f6", "out", "/store/obj/fd-9.0.0-d4e5f6");
 
-    let path_cmd = "export PATH=${build:a1b2c3:out}/bin:${build:d4e5f6:out}/bin:$$PATH";
+    let path_cmd = "export PATH=$${build:a1b2c3:out}/bin:$${build:d4e5f6:out}/bin:$PATH";
     let result = substitute(path_cmd, &resolver).unwrap();
 
     assert_eq!(
@@ -353,10 +383,10 @@ mod tests {
   #[test]
   fn symlink_to_config_directory() {
     // Simulates: symlinking a config file from store to user's home
-    // ln -sf ${build:nvim-config:out}/init.lua ~/.config/nvim/init.lua
+    // ln -sf $${build:nvim-config:out}/init.lua ~/.config/nvim/init.lua
     let resolver = TestResolver::new().with_build("cfg123", "out", "/store/obj/nvim-config-1.0.0-cfg123");
 
-    let cmd = "ln -sf ${build:cfg123:out}/init.lua $$HOME/.config/nvim/init.lua";
+    let cmd = "ln -sf $${build:cfg123:out}/init.lua $HOME/.config/nvim/init.lua";
     let result = substitute(cmd, &resolver).unwrap();
 
     assert_eq!(
@@ -368,11 +398,11 @@ mod tests {
   #[test]
   fn docker_container_from_action_output() {
     // Simulates: start a container, capture its ID, then use it later
-    // container_id=$(docker run -d postgres) -> ${action:0}
-    // docker exec ${action:0} psql ...
+    // container_id=$(docker run -d postgres) -> $${action:0}
+    // docker exec $${action:0} psql ...
     let resolver = TestResolver::new().with_action("abc123def456");
 
-    let cmd = "docker exec ${action:0} psql -U postgres -c 'SELECT 1'";
+    let cmd = "docker exec $${action:0} psql -U postgres -c 'SELECT 1'";
     let result = substitute(cmd, &resolver).unwrap();
 
     assert_eq!(result, "docker exec abc123def456 psql -U postgres -c 'SELECT 1'");
@@ -381,16 +411,16 @@ mod tests {
   #[test]
   fn shell_script_with_variables() {
     // Simulates: a shell script that uses both placeholders and shell variables
-    // The $1, $?, and $HOME should be preserved as shell variables
+    // The $1, $?, and $HOME should be preserved as shell variables (no escaping needed)
     let resolver = TestResolver::new().with_build("app123", "out", "/store/obj/myapp-1.0.0-app123");
 
     let script = r#"#!/bin/bash
-if [ -z "$$1" ]; then
-  echo "Usage: $$0 <arg>"
+if [ -z "$1" ]; then
+  echo "Usage: $0 <arg>"
   exit 1
 fi
-${build:app123:out}/bin/myapp "$$1"
-exit $$?"#;
+$${build:app123:out}/bin/myapp "$1"
+exit $?"#;
 
     let result = substitute(script, &resolver).unwrap();
 
@@ -415,7 +445,7 @@ exit $?"#
       .with_action("/build/source") // action:1 - extract result
       .with_action("/build/source/Makefile"); // action:2 - configure result
 
-    let make_cmd = "make -C ${action:1} -f ${action:2}";
+    let make_cmd = "make -C $${action:1} -f $${action:2}";
     let result = substitute(make_cmd, &resolver).unwrap();
 
     assert_eq!(result, "make -C /build/source -f /build/source/Makefile");
@@ -430,7 +460,7 @@ exit $?"#
       .with_bind("bind456", "link", "/usr/local/bin/rg");
 
     // The bind's apply command
-    let apply_cmd = "ln -sf ${build:rg123:out}/bin/rg /usr/local/bin/rg";
+    let apply_cmd = "ln -sf $${build:rg123:out}/bin/rg /usr/local/bin/rg";
     let apply_result = substitute(apply_cmd, &resolver).unwrap();
     assert_eq!(
       apply_result,
@@ -438,7 +468,7 @@ exit $?"#
     );
 
     // The bind's destroy command (uses bind's own output)
-    let destroy_cmd = "rm -f ${bind:bind456:link}";
+    let destroy_cmd = "rm -f $${bind:bind456:link}";
     let destroy_result = substitute(destroy_cmd, &resolver).unwrap();
     assert_eq!(destroy_result, "rm -f /usr/local/bin/rg");
   }
@@ -450,9 +480,9 @@ exit $?"#
       .with_build("go123", "out", "/store/obj/go-1.21.0-go123")
       .with_build("rust456", "out", "/store/obj/rust-1.75.0-rust456");
 
-    let env_content = r#"export GOROOT=${build:go123:out}
-export CARGO_HOME=${build:rust456:out}
-export PATH=${build:go123:out}/bin:${build:rust456:out}/bin:$$PATH"#;
+    let env_content = r#"export GOROOT=$${build:go123:out}
+export CARGO_HOME=$${build:rust456:out}
+export PATH=$${build:go123:out}/bin:$${build:rust456:out}/bin:$PATH"#;
 
     let result = substitute(env_content, &resolver).unwrap();
 
@@ -470,45 +500,45 @@ export PATH=/store/obj/go-1.21.0-go123/bin:/store/obj/rust-1.75.0-rust456/bin:$P
 
   #[test]
   fn error_unclosed_placeholder() {
-    let result = parse("tar xf ${action:0");
+    let result = parse("tar xf $${action:0");
     assert!(matches!(result, Err(PlaceholderError::Unclosed(7))));
   }
 
   #[test]
   fn error_unknown_placeholder_type() {
-    let result = parse("${unknown:foo}");
+    let result = parse("$${unknown:foo}");
     assert!(matches!(result, Err(PlaceholderError::UnknownType(ref s)) if s == "unknown"));
   }
 
   #[test]
   fn error_invalid_action_index() {
-    let result = parse("${action:foo}");
+    let result = parse("$${action:foo}");
     assert!(matches!(result, Err(PlaceholderError::InvalidActionIndex(ref s)) if s == "foo"));
   }
 
   #[test]
   fn error_malformed_missing_colon() {
-    let result = parse("${action}");
+    let result = parse("$${action}");
     assert!(matches!(result, Err(PlaceholderError::Malformed(_))));
   }
 
   #[test]
   fn error_build_missing_output_name() {
-    let result = parse("${build:abc123}");
+    let result = parse("$${build:abc123}");
     assert!(matches!(result, Err(PlaceholderError::Malformed(_))));
   }
 
   #[test]
   fn error_unresolved_action() {
     let resolver = TestResolver::new();
-    let result = substitute("${action:5}", &resolver);
+    let result = substitute("$${action:5}", &resolver);
     assert!(matches!(result, Err(PlaceholderError::UnresolvedAction(5))));
   }
 
   #[test]
   fn error_unresolved_build() {
     let resolver = TestResolver::new();
-    let result = substitute("${build:nonexistent:out}", &resolver);
+    let result = substitute("$${build:nonexistent:out}", &resolver);
     assert!(
       matches!(result, Err(PlaceholderError::UnresolvedBuild { ref hash, ref output })
         if hash == "nonexistent" && output == "out")
@@ -518,7 +548,7 @@ export PATH=/store/obj/go-1.21.0-go123/bin:/store/obj/rust-1.75.0-rust456/bin:$P
   #[test]
   fn error_unresolved_bind() {
     let resolver = TestResolver::new();
-    let result = substitute("${bind:nonexistent:link}", &resolver);
+    let result = substitute("$${bind:nonexistent:link}", &resolver);
     assert!(
       matches!(result, Err(PlaceholderError::UnresolvedBind { ref hash, ref output })
         if hash == "nonexistent" && output == "link")
@@ -538,6 +568,30 @@ export PATH=/store/obj/go-1.21.0-go123/bin:/store/obj/rust-1.75.0-rust456/bin:$P
   }
 
   #[test]
+  fn shell_variables_pass_through() {
+    // Shell variables like $HOME, $PATH, $1 should pass through unchanged
+    let resolver = TestResolver::new();
+    let result = substitute("echo $HOME $PATH $1 $?", &resolver).unwrap();
+    assert_eq!(result, "echo $HOME $PATH $1 $?");
+  }
+
+  #[test]
+  fn double_dollar_without_brace_preserved() {
+    // $$ without { should pass through as literal $$
+    let resolver = TestResolver::new();
+    let result = substitute("echo $$variable", &resolver).unwrap();
+    assert_eq!(result, "echo $$variable");
+  }
+
+  #[test]
+  fn escape_placeholder_syntax() {
+    // $$${...} should produce literal $${...} (escape mechanism)
+    let resolver = TestResolver::new();
+    let result = substitute("echo $$${action:0}", &resolver).unwrap();
+    assert_eq!(result, "echo $${action:0}");
+  }
+
+  #[test]
   fn empty_input() {
     let segments = parse("").unwrap();
     assert!(segments.is_empty());
@@ -547,7 +601,7 @@ export PATH=/store/obj/go-1.21.0-go123/bin:/store/obj/rust-1.75.0-rust456/bin:$P
   fn adjacent_placeholders_no_separator() {
     let resolver = TestResolver::new().with_action("foo").with_action("bar");
 
-    let result = substitute("${action:0}${action:1}", &resolver).unwrap();
+    let result = substitute("$${action:0}$${action:1}", &resolver).unwrap();
     assert_eq!(result, "foobar");
   }
 }

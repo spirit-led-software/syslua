@@ -1,5 +1,9 @@
+pub mod bind;
+pub mod build;
 pub mod entrypoint;
 pub mod globals;
 pub mod helpers;
-pub mod loader;
+pub mod inputs;
+pub mod loaders;
+pub mod outputs;
 pub mod runtime;

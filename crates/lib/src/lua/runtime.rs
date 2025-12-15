@@ -1,8 +1,12 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use mlua::prelude::*;
 
-use crate::lua::{globals, loader};
+use crate::lua::{globals, loaders};
+use crate::manifest::Manifest;
 
-pub fn create_runtime() -> LuaResult<Lua> {
+pub fn create_runtime(manifest: Rc<RefCell<Manifest>>) -> LuaResult<Lua> {
   let lua = Lua::new();
   lua
     .load(
@@ -13,10 +17,10 @@ pub fn create_runtime() -> LuaResult<Lua> {
     .exec()?;
 
   // Install custom module loaders that inject __dir into each loaded file
-  loader::install_loaders(&lua)?;
+  loaders::install_loaders(&lua)?;
 
-  // Register global tables (sys.platform, sys.os, sys.arch, etc.)
-  globals::register_globals(&lua)?;
+  // Register global tables (sys.platform, sys.os, sys.arch, sys.build, etc.)
+  globals::register_globals(&lua, manifest)?;
 
   Ok(lua)
 }

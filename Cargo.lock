@@ -738,10 +738,14 @@ dependencies = [
 name = "syslua-cli"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
+ "rustix",
+ "serde_json",
  "syslua-lib",
  "tracing",
  "tracing-subscriber",
+ "windows-sys",
 ]
 
 [[package]]
@@ -756,6 +760,7 @@ dependencies = [
  "temp-env",
  "tempfile",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

@@ -13,6 +13,8 @@ pub mod bind;
 pub mod build;
 pub mod consts;
 pub mod error;
+pub mod eval;
+pub mod inputs;
 pub mod lua;
 pub mod manifest;
 pub mod placeholder;
