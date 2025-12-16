@@ -542,6 +542,19 @@ mod tests {
     assert!(matches!(result, Err(ExecuteError::CmdFailed { .. })));
   }
 
+  /// Helper to create an echo command that combines two placeholders.
+  /// On Unix, we can use quotes. On Windows cmd.exe, quotes are echoed literally.
+  #[cfg(unix)]
+  fn echo_combined_placeholders() -> String {
+    "echo \"$${action:0} $${action:1}\"".to_string()
+  }
+
+  #[cfg(windows)]
+  fn echo_combined_placeholders() -> String {
+    // cmd.exe echoes quotes literally, so omit them
+    "echo $${action:0} $${action:1}".to_string()
+  }
+
   #[tokio::test]
   #[serial]
   async fn apply_bind_multiple_actions() {
@@ -559,7 +572,7 @@ mod tests {
           cwd: None,
         },
         BindAction::Cmd {
-          cmd: "echo \"$${action:0} $${action:1}\"".to_string(),
+          cmd: echo_combined_placeholders(),
           env: None,
           cwd: None,
         },

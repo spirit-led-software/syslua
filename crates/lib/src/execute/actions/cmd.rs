@@ -374,12 +374,13 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    // Test multiline command with cmd.exe - just verify multiline works
-    let cmd = "echo first\necho 3";
+    // Test command chaining with cmd.exe using && operator
+    // (cmd.exe doesn't execute multiple lines like Unix shells)
+    let cmd = "echo first && echo 3";
 
     let result = execute_cmd(cmd, None, None, out_dir, None).await.unwrap();
 
-    // cmd.exe should execute both lines, output ends with "3"
+    // cmd.exe should execute both commands, output ends with "3"
     assert!(
       result.ends_with("3"),
       "Expected output to end with '3', got: {}",
