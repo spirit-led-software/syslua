@@ -2463,6 +2463,7 @@ version = "0.1.0"
 dependencies = [
  "gix",
  "hex",
+ "libc",
  "mlua",
  "petgraph",
  "reqwest",
@@ -2476,6 +2477,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "walkdir",
  "windows-sys 0.61.2",
 ]
 

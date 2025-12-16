@@ -9,7 +9,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use syslua_lib::eval::evaluate_config;
-use syslua_lib::platform::paths;
+use syslua_lib::platform::{self, paths};
 use syslua_lib::util::hash::Hashable;
 
 /// Execute the plan command.
@@ -29,7 +29,7 @@ pub fn cmd_plan(file: &str) -> Result<()> {
   let hash = manifest.compute_hash().context("Failed to compute manifest hash")?;
 
   // Determine base directory based on privileges
-  let base_dir = if syslua_lib::platform::is_elevated() {
+  let base_dir = if platform::is_elevated() {
     paths::root_dir()
   } else {
     paths::data_dir()

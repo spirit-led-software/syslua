@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use tracing::info;
 
 use syslua_lib::execute::{ApplyOptions, ExecuteConfig, apply};
-use syslua_lib::platform::paths;
+use syslua_lib::platform::{self, paths};
 
 /// Execute the apply command.
 ///
@@ -26,7 +26,7 @@ pub fn cmd_apply(file: &str) -> Result<()> {
   let path = Path::new(file);
 
   // Determine if running as elevated
-  let system = syslua_lib::platform::is_elevated();
+  let system = platform::is_elevated();
 
   let options = ApplyOptions {
     execute: ExecuteConfig {

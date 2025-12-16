@@ -991,7 +991,7 @@ mod tests {
 
       let rt = tokio::runtime::Runtime::new().unwrap();
       let result = rt.block_on(destroy_removed_binds(
-        &[hash.clone()],
+        std::slice::from_ref(&hash),
         Some(&manifest),
         &ExecuteConfig::default(),
       ));

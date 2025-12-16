@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::placeholder::PlaceholderError;
-use crate::util::hash::ObjectHash;
+use crate::util::hash::{DirHashError, ObjectHash};
 
 /// Identifies what caused a build or bind to be skipped.
 ///
@@ -87,6 +87,22 @@ pub enum ExecuteError {
   /// Manifest validation failed (e.g., build depends on bind).
   #[error("invalid manifest: {0}")]
   InvalidManifest(String),
+
+  /// Failed to hash build output directory.
+  #[error("failed to hash build output: {0}")]
+  HashOutput(#[from] DirHashError),
+
+  /// Failed to write build marker file.
+  #[error("failed to write build marker: {0}")]
+  WriteMarker(#[source] std::io::Error),
+
+  /// Failed to read build marker file.
+  #[error("failed to read build marker: {0}")]
+  ReadMarker(#[source] std::io::Error),
+
+  /// Failed to parse build marker JSON.
+  #[error("failed to parse build marker: {0}")]
+  ParseMarker(#[source] serde_json::Error),
 }
 
 /// Result of executing a single action.
@@ -249,14 +265,16 @@ mod tests {
 
   #[test]
   fn dag_result_failure_with_build_failed() {
-    let mut result = DagResult::default();
-    result.build_failed = Some((
-      ObjectHash("abc123".to_string()),
-      ExecuteError::CmdFailed {
-        cmd: "make".to_string(),
-        code: Some(1),
-      },
-    ));
+    let result = DagResult {
+      build_failed: Some((
+        ObjectHash("abc123".to_string()),
+        ExecuteError::CmdFailed {
+          cmd: "make".to_string(),
+          code: Some(1),
+        },
+      )),
+      ..Default::default()
+    };
     assert!(!result.is_success());
     assert_eq!(result.build_total(), 1);
     assert_eq!(result.total(), 1);
@@ -264,14 +282,16 @@ mod tests {
 
   #[test]
   fn dag_result_failure_with_bind_failed() {
-    let mut result = DagResult::default();
-    result.bind_failed = Some((
-      ObjectHash("def456".to_string()),
-      ExecuteError::CmdFailed {
-        cmd: "ln -s".to_string(),
-        code: Some(1),
-      },
-    ));
+    let result = DagResult {
+      bind_failed: Some((
+        ObjectHash("def456".to_string()),
+        ExecuteError::CmdFailed {
+          cmd: "ln -s".to_string(),
+          code: Some(1),
+        },
+      )),
+      ..Default::default()
+    };
     assert!(!result.is_success());
     assert_eq!(result.bind_total(), 1);
     assert_eq!(result.total(), 1);

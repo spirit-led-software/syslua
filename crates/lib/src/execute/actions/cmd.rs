@@ -68,7 +68,10 @@ pub async fn execute_cmd(
     .env("out", out_dir)
     // Set a minimal locale
     .env("LANG", "C")
-    .env("LC_ALL", "C");
+    .env("LC_ALL", "C")
+    // Set SOURCE_DATE_EPOCH for reproducible timestamps
+    // Value is 315532800 = January 1, 1980 00:00:00 UTC (ZIP epoch)
+    .env("SOURCE_DATE_EPOCH", "315532800");
 
   // Merge user-specified environment variables
   if let Some(user_env) = env {
@@ -195,6 +198,18 @@ mod tests {
     let result = execute_cmd("echo $PATH", None, None, out_dir, None).await.unwrap();
 
     assert_eq!(result, "/path-not-set");
+  }
+
+  #[tokio::test]
+  async fn execute_command_has_source_date_epoch() {
+    let temp_dir = TempDir::new().unwrap();
+    let out_dir = temp_dir.path();
+
+    let result = execute_cmd("echo $SOURCE_DATE_EPOCH", None, None, out_dir, None)
+      .await
+      .unwrap();
+
+    assert_eq!(result, "315532800");
   }
 
   #[tokio::test]

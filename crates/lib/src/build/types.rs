@@ -335,7 +335,7 @@ mod tests {
   use super::*;
 
   mod build_def {
-    use crate::consts::HASH_PREFIX_LEN;
+    use crate::consts::OBJ_HASH_PREFIX_LEN;
 
     use super::*;
 
@@ -366,7 +366,7 @@ mod tests {
     fn hash_is_truncated() {
       let def = simple_def();
       let hash = def.compute_hash().unwrap();
-      assert_eq!(hash.0.len(), HASH_PREFIX_LEN);
+      assert_eq!(hash.0.len(), OBJ_HASH_PREFIX_LEN);
     }
 
     #[test]

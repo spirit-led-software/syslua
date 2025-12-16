@@ -1,10 +1,13 @@
 pub mod arch;
+pub mod immutable;
 pub mod os;
 pub mod paths;
 
 use arch::Arch;
 use os::Os;
 use std::fmt;
+
+pub use immutable::{ImmutableError, make_immutable, make_mutable};
 
 /// Platform identifier combining architecture and OS (e.g., "aarch64-darwin")
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -4,10 +4,11 @@
 //! producing the final BuildResult.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::build::BuildDef;
 use crate::build::store::build_path;
@@ -17,7 +18,101 @@ use crate::placeholder;
 use crate::execute::actions::execute_action;
 use crate::execute::resolver::{BuildResolver, ExecutionResolver};
 use crate::execute::types::{ActionResult, BindResult, BuildResult, ExecuteConfig, ExecuteError};
-use crate::util::hash::ObjectHash;
+use crate::util::hash::{ObjectHash, hash_directory};
+
+/// Marker file name indicating a build completed successfully.
+pub const BUILD_COMPLETE_MARKER: &str = ".syslua-complete";
+
+/// Files/directories excluded when hashing build outputs.
+/// - BUILD_COMPLETE_MARKER: The marker itself (written after hash)
+/// - "tmp": Build temp directory (may have leftovers)
+const BUILD_HASH_EXCLUSIONS: &[&str] = &[".syslua-complete", "tmp"];
+
+/// Marker file content structure.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BuildMarker {
+  /// Marker format version.
+  pub version: u32,
+  /// Build status (always "complete" for successful builds).
+  pub status: String,
+  /// Full 64-character SHA256 hash of build outputs.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub output_hash: Option<String>,
+}
+
+/// Write the build completion marker with output hash.
+/// Called after build succeeds, before returning BuildResult.
+async fn write_build_complete_marker(store_path: &Path) -> Result<(), ExecuteError> {
+  // Compute hash of build outputs (excluding marker and tmp)
+  let output_hash = hash_directory(store_path, BUILD_HASH_EXCLUSIONS)?;
+
+  let marker = BuildMarker {
+    version: 1,
+    status: "complete".to_string(),
+    output_hash: Some(output_hash.0),
+  };
+  let content = serde_json::to_string(&marker).expect("failed to serialize marker");
+  fs::write(store_path.join(BUILD_COMPLETE_MARKER), format!("{}\n", content))
+    .await
+    .map_err(ExecuteError::WriteMarker)
+}
+
+/// Read the build completion marker.
+///
+/// Returns `None` if the marker doesn't exist.
+/// Returns `Some(marker)` if it exists and can be parsed.
+pub fn read_build_marker(store_path: &Path) -> Result<Option<BuildMarker>, ExecuteError> {
+  let marker_path = store_path.join(BUILD_COMPLETE_MARKER);
+
+  if !marker_path.exists() {
+    return Ok(None);
+  }
+
+  let content = std::fs::read_to_string(&marker_path).map_err(ExecuteError::ReadMarker)?;
+  let marker: BuildMarker = serde_json::from_str(&content).map_err(ExecuteError::ParseMarker)?;
+  Ok(Some(marker))
+}
+
+/// Check if a build store path has a completion marker.
+pub fn is_build_complete(store_path: &Path) -> bool {
+  read_build_marker(store_path).map(|m| m.is_some()).unwrap_or(false)
+}
+
+/// Verify a cached build's output hash matches the marker.
+///
+/// Returns `true` if valid (should use cache), `false` if should rebuild.
+/// Legacy markers without `output_hash` are trusted.
+fn verify_build_hash(store_path: &Path, marker: &BuildMarker) -> bool {
+  let Some(stored_hash) = &marker.output_hash else {
+    // Legacy marker without hash - trust it
+    debug!(path = ?store_path, "legacy marker without hash, trusting cache");
+    return true;
+  };
+
+  match hash_directory(store_path, BUILD_HASH_EXCLUSIONS) {
+    Ok(current_hash) => {
+      if current_hash.0 == *stored_hash {
+        true
+      } else {
+        warn!(
+          path = ?store_path,
+          expected = %stored_hash,
+          actual = %current_hash.0,
+          "build output corrupted, will rebuild"
+        );
+        false
+      }
+    }
+    Err(e) => {
+      warn!(
+        path = ?store_path,
+        error = %e,
+        "failed to hash build output, will rebuild"
+      );
+      false
+    }
+  }
+}
 
 /// Realize a single build.
 ///
@@ -54,19 +149,32 @@ pub async fn realize_build(
 
   // Check if already built (cache hit)
   if store_path.exists() {
-    debug!(path = ?store_path, "build already exists in store");
-    // TODO: Verify the build is complete (e.g., check for marker file)
-    // For now, assume existence means complete
-
-    // We need to recover the outputs - for cached builds, read from a metadata file
-    // or re-resolve from the definition
-    let outputs = resolve_outputs(build_def, &store_path, &[], completed_builds, manifest, config)?;
-
-    return Ok(BuildResult {
-      store_path,
-      outputs,
-      action_results: vec![],
-    });
+    match read_build_marker(&store_path) {
+      Ok(Some(marker)) => {
+        if verify_build_hash(&store_path, &marker) {
+          debug!(path = ?store_path, "build already exists in store (cache hit)");
+          let outputs = resolve_outputs(build_def, &store_path, &[], completed_builds, manifest, config)?;
+          return Ok(BuildResult {
+            store_path,
+            outputs,
+            action_results: vec![],
+          });
+        }
+        // Hash mismatch - remove and rebuild
+        debug!(path = ?store_path, "removing corrupted build");
+        fs::remove_dir_all(&store_path).await?;
+      }
+      Ok(None) => {
+        // No marker - incomplete build
+        debug!(path = ?store_path, "incomplete build found, removing");
+        fs::remove_dir_all(&store_path).await?;
+      }
+      Err(e) => {
+        // Invalid marker - treat as incomplete
+        debug!(path = ?store_path, error = %e, "invalid marker, removing");
+        fs::remove_dir_all(&store_path).await?;
+      }
+    }
   }
 
   // Create the output directory
@@ -97,6 +205,9 @@ pub async fn realize_build(
     manifest,
     config,
   )?;
+
+  // Write completion marker
+  write_build_complete_marker(&store_path).await?;
 
   info!(
     name = %build_def.name,
@@ -149,24 +260,40 @@ pub async fn realize_build_with_resolver(
 
   // Check if already built (cache hit)
   if store_path.exists() {
-    debug!(path = ?store_path, "build already exists in store");
-
-    // Recover outputs for cached builds
-    let outputs = resolve_outputs_with_resolver(
-      build_def,
-      &store_path,
-      &[],
-      completed_builds,
-      completed_binds,
-      manifest,
-      config,
-    )?;
-
-    return Ok(BuildResult {
-      store_path,
-      outputs,
-      action_results: vec![],
-    });
+    match read_build_marker(&store_path) {
+      Ok(Some(marker)) => {
+        if verify_build_hash(&store_path, &marker) {
+          debug!(path = ?store_path, "build already exists in store (cache hit)");
+          let outputs = resolve_outputs_with_resolver(
+            build_def,
+            &store_path,
+            &[],
+            completed_builds,
+            completed_binds,
+            manifest,
+            config,
+          )?;
+          return Ok(BuildResult {
+            store_path,
+            outputs,
+            action_results: vec![],
+          });
+        }
+        // Hash mismatch - remove and rebuild
+        debug!(path = ?store_path, "removing corrupted build");
+        fs::remove_dir_all(&store_path).await?;
+      }
+      Ok(None) => {
+        // No marker - incomplete build
+        debug!(path = ?store_path, "incomplete build found, removing");
+        fs::remove_dir_all(&store_path).await?;
+      }
+      Err(e) => {
+        // Invalid marker - treat as incomplete
+        debug!(path = ?store_path, error = %e, "invalid marker, removing");
+        fs::remove_dir_all(&store_path).await?;
+      }
+    }
   }
 
   // Create the output directory
@@ -198,6 +325,9 @@ pub async fn realize_build_with_resolver(
     manifest,
     config,
   )?;
+
+  // Write completion marker
+  write_build_complete_marker(&store_path).await?;
 
   info!(
     name = %build_def.name,
@@ -484,6 +614,223 @@ mod tests {
       let result = realize_build(&hash, &build_def, &completed, &manifest, &config).await;
 
       assert!(matches!(result, Err(ExecuteError::CmdFailed { .. })));
+    });
+  }
+
+  #[test]
+  fn is_build_complete_without_marker() {
+    let temp = TempDir::new().unwrap();
+    let store_path = temp.path().join("test-build");
+    std::fs::create_dir(&store_path).unwrap();
+
+    assert!(!is_build_complete(&store_path));
+  }
+
+  #[test]
+  fn is_build_complete_with_marker() {
+    let temp = TempDir::new().unwrap();
+    let store_path = temp.path().join("test-build");
+    std::fs::create_dir(&store_path).unwrap();
+    std::fs::write(
+      store_path.join(BUILD_COMPLETE_MARKER),
+      r#"{"version":1,"status":"complete"}"#,
+    )
+    .unwrap();
+
+    assert!(is_build_complete(&store_path));
+  }
+
+  #[test]
+  #[serial]
+  fn successful_build_has_completion_marker() {
+    with_temp_store(|| async {
+      let build_def = make_simple_build();
+      let hash = build_def.compute_hash().unwrap();
+      let manifest = Manifest {
+        builds: [(hash.clone(), build_def.clone())].into_iter().collect(),
+        bindings: Default::default(),
+      };
+      let config = test_config();
+
+      let result = realize_build(&hash, &build_def, &HashMap::new(), &manifest, &config)
+        .await
+        .unwrap();
+
+      // Verify marker exists
+      assert!(is_build_complete(&result.store_path));
+
+      // Verify marker content using read_build_marker
+      let marker = read_build_marker(&result.store_path).unwrap().unwrap();
+      assert_eq!(marker.version, 1);
+      assert_eq!(marker.status, "complete");
+      assert!(marker.output_hash.is_some());
+      assert_eq!(marker.output_hash.unwrap().len(), 64);
+    });
+  }
+
+  #[test]
+  #[serial]
+  fn incomplete_build_triggers_rebuild() {
+    with_temp_store(|| async {
+      let build_def = make_simple_build();
+      let hash = build_def.compute_hash().unwrap();
+      let manifest = Manifest {
+        builds: [(hash.clone(), build_def.clone())].into_iter().collect(),
+        bindings: Default::default(),
+      };
+      let config = test_config();
+
+      // Pre-create the store path WITHOUT a marker (simulating interrupted build)
+      let store_path = build_path(&build_def.name, build_def.version.as_deref(), &hash, config.system);
+      tokio::fs::create_dir_all(&store_path).await.unwrap();
+      tokio::fs::write(store_path.join("partial-file"), "incomplete")
+        .await
+        .unwrap();
+
+      // Run build - should detect incomplete and rebuild
+      let result = realize_build(&hash, &build_def, &HashMap::new(), &manifest, &config)
+        .await
+        .unwrap();
+
+      // Verify marker now exists
+      assert!(is_build_complete(&result.store_path));
+
+      // Verify the partial file was removed (directory was cleaned)
+      assert!(!result.store_path.join("partial-file").exists());
+    });
+  }
+
+  #[test]
+  fn read_build_marker_missing() {
+    let temp = TempDir::new().unwrap();
+    let marker = read_build_marker(temp.path()).unwrap();
+    assert!(marker.is_none());
+  }
+
+  #[test]
+  fn read_build_marker_valid() {
+    let temp = TempDir::new().unwrap();
+    let hash = "a".repeat(64);
+    std::fs::write(
+      temp.path().join(BUILD_COMPLETE_MARKER),
+      format!(r#"{{"version":1,"status":"complete","output_hash":"{}"}}"#, hash),
+    )
+    .unwrap();
+
+    let marker = read_build_marker(temp.path()).unwrap().unwrap();
+    assert_eq!(marker.version, 1);
+    assert_eq!(marker.status, "complete");
+    assert!(marker.output_hash.is_some());
+  }
+
+  #[test]
+  fn read_build_marker_without_hash() {
+    // Markers from before Chunk 7 don't have output_hash
+    let temp = TempDir::new().unwrap();
+    std::fs::write(
+      temp.path().join(BUILD_COMPLETE_MARKER),
+      r#"{"version":1,"status":"complete"}"#,
+    )
+    .unwrap();
+
+    let marker = read_build_marker(temp.path()).unwrap().unwrap();
+    assert_eq!(marker.version, 1);
+    assert!(marker.output_hash.is_none());
+  }
+
+  #[test]
+  fn marker_hash_matches_directory_hash() {
+    let temp = TempDir::new().unwrap();
+    std::fs::write(temp.path().join("file.txt"), "content").unwrap();
+
+    // Compute expected hash (with same exclusions)
+    let expected_hash = hash_directory(temp.path(), BUILD_HASH_EXCLUSIONS).unwrap();
+
+    // Write marker using our function
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+      write_build_complete_marker(temp.path()).await.unwrap();
+    });
+
+    // Read and verify hash matches
+    let marker = read_build_marker(temp.path()).unwrap().unwrap();
+    assert_eq!(marker.output_hash.unwrap(), expected_hash.0);
+  }
+
+  #[test]
+  fn verify_valid_build_cache_hit() {
+    let temp = TempDir::new().unwrap();
+    std::fs::write(temp.path().join("file.txt"), "content").unwrap();
+
+    // Write marker with hash
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+      write_build_complete_marker(temp.path()).await.unwrap();
+    });
+
+    let marker = read_build_marker(temp.path()).unwrap().unwrap();
+    assert!(verify_build_hash(temp.path(), &marker));
+  }
+
+  #[test]
+  fn verify_corrupted_build_triggers_rebuild() {
+    let temp = TempDir::new().unwrap();
+    std::fs::write(temp.path().join("file.txt"), "original").unwrap();
+
+    // Write marker with hash for "original" content
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+      write_build_complete_marker(temp.path()).await.unwrap();
+    });
+
+    // Corrupt the file
+    std::fs::write(temp.path().join("file.txt"), "corrupted").unwrap();
+
+    let marker = read_build_marker(temp.path()).unwrap().unwrap();
+    assert!(!verify_build_hash(temp.path(), &marker));
+  }
+
+  #[test]
+  fn verify_legacy_marker_without_hash_uses_cache() {
+    let temp = TempDir::new().unwrap();
+    std::fs::write(temp.path().join("file.txt"), "content").unwrap();
+
+    // Write legacy marker without output_hash
+    std::fs::write(
+      temp.path().join(BUILD_COMPLETE_MARKER),
+      r#"{"version":1,"status":"complete"}"#,
+    )
+    .unwrap();
+
+    let marker = read_build_marker(temp.path()).unwrap().unwrap();
+    assert!(verify_build_hash(temp.path(), &marker));
+  }
+
+  #[test]
+  #[serial]
+  fn corrupted_build_triggers_full_rebuild() {
+    with_temp_store(|| async {
+      let build_def = make_simple_build();
+      let hash = build_def.compute_hash().unwrap();
+      let manifest = Manifest {
+        builds: [(hash.clone(), build_def.clone())].into_iter().collect(),
+        bindings: Default::default(),
+      };
+      let config = test_config();
+
+      // First build - creates valid cached build
+      let result1 = realize_build(&hash, &build_def, &HashMap::new(), &manifest, &config)
+        .await
+        .unwrap();
+
+      // Corrupt the build by adding a file
+      std::fs::write(result1.store_path.join("corrupt.txt"), "bad data").unwrap();
+
+      // Second build - should detect corruption and rebuild
+      let result2 = realize_build(&hash, &build_def, &HashMap::new(), &manifest, &config)
+        .await
+        .unwrap();
+
+      // Verify rebuild happened (corruption file removed)
+      assert!(!result2.store_path.join("corrupt.txt").exists());
+      assert!(is_build_complete(&result2.store_path));
     });
   }
 }

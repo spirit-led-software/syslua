@@ -355,7 +355,7 @@ mod tests {
   }
 
   mod sys_build {
-    use crate::consts::HASH_PREFIX_LEN;
+    use crate::consts::OBJ_HASH_PREFIX_LEN;
 
     use super::*;
 
@@ -522,7 +522,7 @@ mod tests {
           match dep {
             BuildInputs::Build(build_hash) => {
               // Verify it's a truncated hash (HASH_PREFIX_LEN hex chars)
-              assert_eq!(build_hash.0.len(), HASH_PREFIX_LEN);
+              assert_eq!(build_hash.0.len(), OBJ_HASH_PREFIX_LEN);
               // Verify the referenced build exists
               assert!(manifest.builds.contains_key(build_hash));
             }
