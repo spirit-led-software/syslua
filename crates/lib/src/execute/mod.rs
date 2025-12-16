@@ -646,7 +646,7 @@ mod tests {
 
   #[cfg(windows)]
   fn touch_cmd(path: &std::path::Path) -> String {
-    format!("copy nul \"{}\"", path.display())
+    format!("echo.>\"{}\"", path.display())
   }
 
   /// Returns a command that removes a file at the given path.
