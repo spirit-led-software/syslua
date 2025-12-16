@@ -160,6 +160,7 @@ fn get_shell(override_shell: Option<&str>) -> (String, Vec<String>) {
     let args = if shell.contains("powershell") || shell.contains("pwsh") {
       vec![
         "-NoProfile".to_string(),
+        "-NonInteractive".to_string(),
         "-ExecutionPolicy".to_string(),
         "Bypass".to_string(),
         "-Command".to_string(),
@@ -186,6 +187,7 @@ fn get_shell(override_shell: Option<&str>) -> (String, Vec<String>) {
       "powershell.exe".to_string(),
       vec![
         "-NoProfile".to_string(),
+        "-NonInteractive".to_string(),
         "-ExecutionPolicy".to_string(),
         "Bypass".to_string(),
         "-Command".to_string(),
@@ -403,14 +405,32 @@ mod tests {
   fn get_shell_with_powershell_override() {
     let (shell, args) = get_shell(Some("powershell.exe"));
     assert_eq!(shell, "powershell.exe");
-    assert_eq!(args, vec!["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]);
+    assert_eq!(
+      args,
+      vec![
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command"
+      ]
+    );
   }
 
   #[test]
   fn get_shell_with_pwsh_override() {
     let (shell, args) = get_shell(Some("pwsh"));
     assert_eq!(shell, "pwsh");
-    assert_eq!(args, vec!["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]);
+    assert_eq!(
+      args,
+      vec![
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command"
+      ]
+    );
   }
 
   #[test]
@@ -432,7 +452,16 @@ mod tests {
     #[cfg(windows)]
     {
       assert_eq!(shell, "powershell.exe");
-      assert_eq!(args, vec!["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]);
+      assert_eq!(
+        args,
+        vec![
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command"
+        ]
+      );
     }
   }
 }
