@@ -35,18 +35,20 @@ M.setup = function(opts)
       apply = function(inputs, ctx)
         if opts.source then
           if sys.os == 'windows' then
-            ctx:cmd({
-              cmd = string.format('xcopy /E /I /Y "%s" "%s"', inputs.source, inputs.target),
-            })
+            ctx:cmd(string.format('Copy-Item -Recurse -Path "%s" -Destination "%s"', inputs.source, inputs.target))
           else
             ctx:cmd({
               cmd = string.format('cp -r "%s" "%s"', inputs.source, inputs.target),
             })
           end
         else
-          ctx:cmd({
-            cmd = string.format('echo "%s" > "%s"', inputs.content, inputs.target),
-          })
+          if sys.os == 'windows' then
+            ctx:cmd(string.format('Set-Content -Path "%s" -Value "%s"', inputs.target, inputs.content))
+          else
+            ctx:cmd({
+              cmd = string.format('echo "%s" > "%s"', inputs.content, inputs.target),
+            })
+          end
         end
       end,
     })
@@ -62,18 +64,16 @@ M.setup = function(opts)
       apply = function(inputs, ctx)
         if inputs.source then
           if sys.os == 'windows' then
-            ctx:cmd({
-              cmd = string.format('xcopy /E /I /Y "%s" "%s"', inputs.source, basename),
-            })
+            ctx:cmd(string.format('Copy-Item -Recurse -Path "%s" -Destination "%s"', inputs.source, basename))
           else
-            ctx:cmd({
-              cmd = string.format('cp -r "%s" "%s"', inputs.source, basename),
-            })
+            ctx:cmd(string.format('cp -r "%s" "%s"', inputs.source, basename))
           end
         else
-          ctx:cmd({
-            cmd = string.format('echo "%s" > "%s"', inputs.content, basename),
-          })
+          if sys.os == 'windows' then
+            ctx:cmd(string.format('Set-Content -Path "%s" -Value "%s"', basename, inputs.content))
+          else
+            ctx:cmd(string.format('echo "%s" > "%s"', inputs.content, basename))
+          end
         end
 
         return {
@@ -89,28 +89,22 @@ M.setup = function(opts)
       },
       apply = function(inputs, ctx)
         if sys.os == 'windows' then
-          ctx:cmd({
-            cmd = string.format(
+          ctx:cmd(
+            string.format(
               'New-Item -ItemType SymbolicLink -Path "%s" -Target "%s"',
               inputs.target,
               inputs.build.outputs.out
-            ),
-          })
+            )
+          )
         else
-          ctx:cmd({
-            cmd = string.format('ln -s "%s" "%s"', inputs.build.outputs.out, inputs.target),
-          })
+          ctx:cmd(string.format('ln -s "%s" "%s"', inputs.build.outputs.out, inputs.target))
         end
       end,
       destroy = function(_, ctx)
         if sys.os == 'windows' then
-          ctx:cmd({
-            cmd = string.format('Remove-Item -Path "%s" -Recurse -Force', opts.target),
-          })
+          ctx:cmd(string.format('Remove-Item -Path "%s" -Recurse -Force', opts.target))
         else
-          ctx:cmd({
-            cmd = string.format('rm -rf "%s"', opts.target),
-          })
+          ctx:cmd(string.format('rm -rf "%s"', opts.target))
         end
       end,
     })

@@ -27,7 +27,7 @@ use crate::execute::types::ExecuteError;
 /// * `env` - Optional user-specified environment variables
 /// * `cwd` - Optional working directory (defaults to out_dir)
 /// * `out_dir` - The build's output directory
-/// * `shell` - The shell to use (defaults to /bin/sh on Unix, cmd.exe on Windows)
+/// * `shell` - The shell to use (defaults to /bin/sh on Unix, powershell.exe on Windows)
 ///
 /// # Returns
 ///
@@ -46,14 +46,14 @@ pub async fn execute_cmd(
   tokio::fs::create_dir_all(&tmp_dir).await?;
 
   // Determine shell and arguments
-  let (shell_cmd, shell_arg) = get_shell(shell);
+  let (shell_cmd, shell_args) = get_shell(shell);
 
   let working_dir = cwd.map(Path::new).unwrap_or(out_dir);
 
   // Build the command with isolated environment
   let mut command = Command::new(&shell_cmd);
   command
-    .arg(&shell_arg)
+    .args(&shell_args)
     .arg(cmd)
     .current_dir(working_dir)
     // Clear all environment variables
@@ -131,22 +131,33 @@ pub async fn execute_cmd(
 /// the environment (e.g., adding to PATH), which would break isolation.
 /// Use the `override_shell` parameter only when you explicitly want a
 /// different shell.
-fn get_shell(override_shell: Option<&str>) -> (String, String) {
+fn get_shell(override_shell: Option<&str>) -> (String, Vec<String>) {
   if let Some(shell) = override_shell {
-    // User explicitly specified a shell - use it
-    return (shell.to_string(), "-c".to_string());
+    // User explicitly specified a shell - detect appropriate argument
+    let args = if shell.contains("powershell") || shell.contains("pwsh") {
+      vec!["-NoProfile".to_string(), "-Command".to_string()]
+    } else if shell.contains("cmd") {
+      vec!["/C".to_string()]
+    } else {
+      // Assume Unix-style shell (bash, sh, zsh, etc.)
+      vec!["-c".to_string()]
+    };
+    return (shell.to_string(), args);
   }
 
   // Use the default system shell for isolation
   // Don't use $SHELL as it may source user profiles
   #[cfg(unix)]
   {
-    ("/bin/sh".to_string(), "-c".to_string())
+    ("/bin/sh".to_string(), vec!["-c".to_string()])
   }
 
   #[cfg(windows)]
   {
-    ("cmd.exe".to_string(), "/C".to_string())
+    (
+      "powershell.exe".to_string(),
+      vec!["-NoProfile".to_string(), "-Command".to_string()],
+    )
   }
 }
 
@@ -157,7 +168,7 @@ mod tests {
 
   /// Get an echo command that prints an environment variable.
   /// Unix: echo $VAR
-  /// Windows: echo %VAR%
+  /// Windows: Write-Output $env:VAR
   #[cfg(unix)]
   fn echo_env(var: &str) -> String {
     format!("echo ${}", var)
@@ -165,7 +176,7 @@ mod tests {
 
   #[cfg(windows)]
   fn echo_env(var: &str) -> String {
-    format!("echo %{}%", var)
+    format!("Write-Output $env:{}", var)
   }
 
   #[tokio::test]
@@ -244,7 +255,7 @@ mod tests {
 
   #[cfg(windows)]
   fn create_cwd_marker() -> &'static str {
-    "copy nul cwd_marker"
+    "New-Item -ItemType File -Path cwd_marker -Force"
   }
 
   #[tokio::test]
@@ -310,35 +321,58 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    // Windows cmd.exe equivalent using set /a for arithmetic
-    let cmd = r#"set /a result=1+2 && echo %result%"#;
+    let cmd = r#"
+      $x = 1
+      $y = 2
+      Write-Output ($x + $y)
+    "#;
 
     let result = execute_cmd(cmd, None, None, out_dir, None).await.unwrap();
 
-    // Note: set /a prints the result directly, so we may get "3" or need adjustment
-    assert!(result.contains("3"));
+    assert_eq!(result, "3");
   }
 
   #[test]
   fn get_shell_with_override() {
     let (shell, arg) = get_shell(Some("/usr/bin/bash"));
     assert_eq!(shell, "/usr/bin/bash");
-    assert_eq!(arg, "-c");
+    assert_eq!(arg, vec!["-c"]);
+  }
+
+  #[test]
+  fn get_shell_with_powershell_override() {
+    let (shell, args) = get_shell(Some("powershell.exe"));
+    assert_eq!(shell, "powershell.exe");
+    assert_eq!(args, vec!["-NoProfile", "-Command"]);
+  }
+
+  #[test]
+  fn get_shell_with_pwsh_override() {
+    let (shell, args) = get_shell(Some("pwsh"));
+    assert_eq!(shell, "pwsh");
+    assert_eq!(args, vec!["-NoProfile", "-Command"]);
+  }
+
+  #[test]
+  fn get_shell_with_cmd_override() {
+    let (shell, args) = get_shell(Some("cmd.exe"));
+    assert_eq!(shell, "cmd.exe");
+    assert_eq!(args, vec!["/C"]);
   }
 
   #[test]
   fn get_shell_default() {
-    // Default shell should be /bin/sh regardless of SHELL env var
-    let (shell, arg) = get_shell(None);
+    // Default shell should be /bin/sh on Unix, powershell.exe on Windows
+    let (shell, args) = get_shell(None);
     #[cfg(unix)]
     {
       assert_eq!(shell, "/bin/sh");
-      assert_eq!(arg, "-c");
+      assert_eq!(args, vec!["-c"]);
     }
     #[cfg(windows)]
     {
-      assert_eq!(shell, "cmd.exe");
-      assert_eq!(arg, "/C");
+      assert_eq!(shell, "powershell.exe");
+      assert_eq!(args, vec!["-NoProfile", "-Command"]);
     }
   }
 }

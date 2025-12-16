@@ -638,7 +638,7 @@ mod tests {
 
   /// Returns a command that creates an empty file at the given path.
   /// Unix: /usr/bin/touch {path}
-  /// Windows: copy nul "{path}"
+  /// Windows: New-Item -ItemType File -Path '{path}' -Force | Out-Null
   #[cfg(unix)]
   fn touch_cmd(path: &std::path::Path) -> String {
     format!("/usr/bin/touch {}", path.display())
@@ -646,12 +646,12 @@ mod tests {
 
   #[cfg(windows)]
   fn touch_cmd(path: &std::path::Path) -> String {
-    format!("echo.>\"{}\"", path.display())
+    format!("New-Item -ItemType File -Path '{}' -Force | Out-Null", path.display())
   }
 
   /// Returns a command that removes a file at the given path.
   /// Unix: /bin/rm -f {path}
-  /// Windows: del /f /q "{path}"
+  /// Windows: Remove-Item -Force -ErrorAction SilentlyContinue '{path}'
   #[cfg(unix)]
   fn rm_cmd(path: &std::path::Path) -> String {
     format!("/bin/rm -f {}", path.display())
@@ -659,7 +659,7 @@ mod tests {
 
   #[cfg(windows)]
   fn rm_cmd(path: &std::path::Path) -> String {
-    format!("del /f /q \"{}\"", path.display())
+    format!("Remove-Item -Force -ErrorAction SilentlyContinue '{}'", path.display())
   }
 
   #[test]
