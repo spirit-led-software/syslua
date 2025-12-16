@@ -125,7 +125,7 @@ pub async fn execute_cmd(
 ///
 /// # Note
 ///
-/// For isolated builds, we always use `/bin/sh` (Unix) or `cmd.exe` (Windows)
+/// For isolated builds, we always use `/bin/sh` (Unix) or `powershell.exe` (Windows)
 /// by default, rather than the user's configured shell. This is because
 /// interactive shells like bash/zsh may source profile files that modify
 /// the environment (e.g., adding to PATH), which would break isolation.
@@ -135,7 +135,12 @@ fn get_shell(override_shell: Option<&str>) -> (String, Vec<String>) {
   if let Some(shell) = override_shell {
     // User explicitly specified a shell - detect appropriate argument
     let args = if shell.contains("powershell") || shell.contains("pwsh") {
-      vec!["-NoProfile".to_string(), "-Command".to_string()]
+      vec![
+        "-NoProfile".to_string(),
+        "-ExecutionPolicy".to_string(),
+        "Bypass".to_string(),
+        "-Command".to_string(),
+      ]
     } else if shell.contains("cmd") {
       vec!["/C".to_string()]
     } else {
