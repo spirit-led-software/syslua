@@ -1,0 +1,250 @@
+//! Bind state persistence for syslua.
+//!
+//! When a bind is applied, its resolved outputs are persisted to disk.
+//! This allows destroy_actions to reference the actual resolved paths
+//! via placeholders like `${out:link}`.
+//!
+//! # Storage Layout
+//!
+//! ```text
+//! store/bind/<hash>/
+//! └── state.json
+//! ```
+//!
+//! # Example State File
+//!
+//! ```json
+//! {
+//!   "outputs": {
+//!     "link": "/home/user/.config/nvim/init.lua",
+//!     "target": "/syslua/store/obj/nvim-config-abc123/init.lua"
+//!   }
+//! }
+//! ```
+
+use std::collections::HashMap;
+use std::fs;
+use std::io;
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::bind::BindHash;
+use crate::platform::paths::store::StorePaths;
+
+/// State file name within bind directory.
+const STATE_FILENAME: &str = "state.json";
+
+/// Persisted state for an applied bind.
+///
+/// This captures the resolved outputs from when the bind was applied,
+/// enabling destroy_actions to reference the actual paths that were created.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BindState {
+  /// Resolved outputs from when the bind was applied.
+  /// Keys are output names, values are resolved paths/values.
+  pub outputs: HashMap<String, String>,
+}
+
+impl BindState {
+  /// Create a new bind state with the given outputs.
+  pub fn new(outputs: HashMap<String, String>) -> Self {
+    Self { outputs }
+  }
+
+  /// Create an empty bind state.
+  pub fn empty() -> Self {
+    Self {
+      outputs: HashMap::new(),
+    }
+  }
+}
+
+/// Errors that can occur when working with bind state.
+#[derive(Debug, Error)]
+pub enum BindStateError {
+  /// Failed to read bind state file.
+  #[error("failed to read bind state: {0}")]
+  Read(#[source] io::Error),
+
+  /// Failed to write bind state file.
+  #[error("failed to write bind state: {0}")]
+  Write(#[source] io::Error),
+
+  /// Failed to create bind state directory.
+  #[error("failed to create bind state directory: {0}")]
+  CreateDir(#[source] io::Error),
+
+  /// Failed to parse bind state JSON.
+  #[error("failed to parse bind state: {0}")]
+  Parse(#[source] serde_json::Error),
+
+  /// Failed to serialize bind state.
+  #[error("failed to serialize bind state: {0}")]
+  Serialize(#[source] serde_json::Error),
+
+  /// Failed to remove bind state.
+  #[error("failed to remove bind state: {0}")]
+  Remove(#[source] io::Error),
+}
+
+/// Get the bind state directory path for a given bind hash.
+///
+/// Returns `store/bind/<short_hash>/` where short_hash is the truncated hash.
+pub fn bind_state_dir(hash: &BindHash, system: bool) -> PathBuf {
+  let store = if system {
+    StorePaths::system_store_path()
+  } else {
+    StorePaths::user_store_path()
+  };
+  store.join("bind").join(hash.0.as_str())
+}
+
+/// Get the bind state file path for a given bind hash.
+fn bind_state_path(hash: &BindHash, system: bool) -> PathBuf {
+  bind_state_dir(hash, system).join(STATE_FILENAME)
+}
+
+/// Save bind state after successful apply.
+///
+/// Creates the bind directory if it doesn't exist and writes the state file.
+/// Uses atomic write (write to temp, then rename) to prevent corruption.
+pub fn save_bind_state(hash: &BindHash, state: &BindState, system: bool) -> Result<(), BindStateError> {
+  let dir = bind_state_dir(hash, system);
+  let path = dir.join(STATE_FILENAME);
+
+  // Create directory if needed
+  fs::create_dir_all(&dir).map_err(BindStateError::CreateDir)?;
+
+  // Serialize state
+  let content = serde_json::to_string_pretty(state).map_err(BindStateError::Serialize)?;
+
+  // Write atomically: write to temp file, then rename
+  let temp_path = dir.join("state.json.tmp");
+  fs::write(&temp_path, &content).map_err(BindStateError::Write)?;
+  fs::rename(&temp_path, &path).map_err(BindStateError::Write)?;
+
+  Ok(())
+}
+
+/// Load bind state for destroy operations.
+///
+/// Returns `Ok(None)` if the state file doesn't exist (bind was never applied
+/// or state was already cleaned up).
+pub fn load_bind_state(hash: &BindHash, system: bool) -> Result<Option<BindState>, BindStateError> {
+  let path = bind_state_path(hash, system);
+
+  let content = match fs::read_to_string(&path) {
+    Ok(content) => content,
+    Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+    Err(e) => return Err(BindStateError::Read(e)),
+  };
+
+  let state: BindState = serde_json::from_str(&content).map_err(BindStateError::Parse)?;
+  Ok(Some(state))
+}
+
+/// Remove bind state after successful destroy.
+///
+/// Removes the entire bind directory including the state file.
+/// Silently succeeds if the directory doesn't exist.
+pub fn remove_bind_state(hash: &BindHash, system: bool) -> Result<(), BindStateError> {
+  let dir = bind_state_dir(hash, system);
+
+  match fs::remove_dir_all(&dir) {
+    Ok(()) => Ok(()),
+    Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+    Err(e) => Err(BindStateError::Remove(e)),
+  }
+}
+
+/// Check if bind state exists for a given hash.
+pub fn bind_state_exists(hash: &BindHash, system: bool) -> bool {
+  bind_state_path(hash, system).exists()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use tempfile::TempDir;
+
+  fn with_temp_store<F>(f: F)
+  where
+    F: FnOnce(&TempDir),
+  {
+    let temp_dir = TempDir::new().unwrap();
+    temp_env::with_var("SYSLUA_USER_STORE", Some(temp_dir.path().to_str().unwrap()), || {
+      f(&temp_dir);
+    });
+  }
+
+  #[test]
+  fn save_and_load_roundtrip() {
+    with_temp_store(|_| {
+      let hash = BindHash("abc123def456789012345678".to_string());
+      let mut outputs = HashMap::new();
+      outputs.insert("link".to_string(), "/home/user/.config/nvim".to_string());
+      outputs.insert("target".to_string(), "/store/obj/nvim-abc123".to_string());
+
+      let state = BindState::new(outputs);
+      save_bind_state(&hash, &state, false).unwrap();
+
+      let loaded = load_bind_state(&hash, false).unwrap().unwrap();
+      assert_eq!(state, loaded);
+    });
+  }
+
+  #[test]
+  fn load_nonexistent_returns_none() {
+    with_temp_store(|_| {
+      let hash = BindHash("nonexistent123456789012".to_string());
+      let result = load_bind_state(&hash, false).unwrap();
+      assert!(result.is_none());
+    });
+  }
+
+  #[test]
+  fn remove_cleans_up_directory() {
+    with_temp_store(|_| {
+      let hash = BindHash("abc123def456789012345678".to_string());
+      let state = BindState::empty();
+
+      save_bind_state(&hash, &state, false).unwrap();
+      assert!(bind_state_exists(&hash, false));
+
+      remove_bind_state(&hash, false).unwrap();
+      assert!(!bind_state_exists(&hash, false));
+    });
+  }
+
+  #[test]
+  fn remove_nonexistent_succeeds() {
+    with_temp_store(|_| {
+      let hash = BindHash("nonexistent123456789012".to_string());
+      // Should not error
+      remove_bind_state(&hash, false).unwrap();
+    });
+  }
+
+  #[test]
+  fn bind_state_dir_uses_truncated_hash() {
+    let hash = BindHash("abc123def456789012345678".to_string());
+    let dir = bind_state_dir(&hash, false);
+    // The directory name should be the truncated hash (20 chars)
+    assert!(dir.ends_with("abc123def45678901234"));
+  }
+
+  #[test]
+  fn empty_outputs_serialization() {
+    with_temp_store(|_| {
+      let hash = BindHash("empty123def456789012345".to_string());
+      let state = BindState::empty();
+
+      save_bind_state(&hash, &state, false).unwrap();
+      let loaded = load_bind_state(&hash, false).unwrap().unwrap();
+
+      assert!(loaded.outputs.is_empty());
+    });
+  }
+}

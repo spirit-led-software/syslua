@@ -13,6 +13,7 @@
 ---@field cwd? string Optional: working directory
 
 ---@class BuildCtx
+---@field out string returns the store path
 ---@field fetch_url fun(self: BuildCtx, url: string, sha256: string): string Fetches a URL and verifies its SHA256 checksum
 ---@field cmd fun(self: BuildCtx, opts: BuildCmdOptions): string Executes a command during the build, returns output
 

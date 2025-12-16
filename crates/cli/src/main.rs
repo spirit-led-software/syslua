@@ -41,10 +41,7 @@ fn main() -> ExitCode {
     .init();
 
   let result = match cli.command {
-    Commands::Apply { file } => {
-      cmd_apply(&file);
-      Ok(())
-    }
+    Commands::Apply { file } => cmd_apply(&file),
     Commands::Plan { file } => cmd_plan(&file),
     Commands::Destroy { file } => {
       cmd_destroy(&file);

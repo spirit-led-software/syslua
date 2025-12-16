@@ -11,3 +11,11 @@ pub fn parse_outputs(table: LuaTable) -> LuaResult<BTreeMap<String, String>> {
   }
   Ok(outputs)
 }
+
+pub fn outputs_to_lua_table(lua: &Lua, outputs: &BTreeMap<String, String>) -> LuaResult<LuaTable> {
+  let table = lua.create_table()?;
+  for (k, v) in outputs {
+    table.set(k.as_str(), v.as_str())?;
+  }
+  Ok(table)
+}

@@ -8,6 +8,7 @@
 //! - Atomic rollback of binds on failure
 
 pub mod actions;
+pub mod apply;
 pub mod bind;
 pub mod build;
 pub mod dag;
@@ -26,6 +27,7 @@ use crate::manifest::Manifest;
 use dag::DagNode;
 use resolver::ExecutionResolver;
 
+pub use apply::{ApplyError, ApplyOptions, ApplyResult, apply};
 pub use dag::ExecutionDag;
 pub use types::{BindResult, BuildResult, DagResult, ExecuteConfig, ExecuteError, FailedDependency};
 

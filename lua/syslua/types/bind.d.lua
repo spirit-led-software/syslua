@@ -11,9 +11,10 @@
 ---@field cwd? string Optional: working directory
 
 ---@class BindCtx
+---@field out string returns the store path
 ---@field cmd fun(self: BindCtx, opts: BindCmdOptions): string Performs a command during application, returns outputs
 
 ---@class BindSpec
 ---@field inputs? table|fun(): table Optional: input data
 ---@field apply fun(inputs: table, ctx: BindCtx): table | nil Required: binding logic, optionally returns outputs
----@field destroy? fun(outputs: table, ctx: BindCtx): nil Optional: cleanup logic
+---@field destroy? fun(outputs: table, ctx: BindCtx): nil Optional: cleanup logic, receives outputs from apply

@@ -12,7 +12,6 @@ use std::rc::Rc;
 use mlua::prelude::*;
 
 use crate::build::{BUILD_REF_TYPE, BuildCmdOptions, BuildCtx, BuildDef};
-use crate::consts::HASH_PREFIX_LEN;
 use crate::inputs::InputsRef;
 use crate::lua::inputs::{contains_bind_ref, inputs_ref_to_lua, lua_value_to_inputs_ref};
 use crate::lua::outputs::parse_outputs;
@@ -191,7 +190,7 @@ pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<
 
     // Convert outputs to Lua table with placeholders for runtime resolution
     let outputs_table = lua.create_table()?;
-    let short_hash = &hash.0[..HASH_PREFIX_LEN.min(hash.0.len())];
+    let short_hash = &hash.0;
     for k in outputs.keys() {
       let placeholder = format!("$${{build:{}:{}}}", short_hash, k);
       outputs_table.set(k.as_str(), placeholder.as_str())?;
@@ -226,6 +225,8 @@ mod tests {
   }
 
   mod sys_build {
+    use crate::consts::HASH_PREFIX_LEN;
+
     use super::*;
 
     #[test]

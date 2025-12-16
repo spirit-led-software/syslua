@@ -11,10 +11,9 @@ use std::rc::Rc;
 use mlua::prelude::*;
 
 use crate::bind::{BIND_REF_TYPE, BindCmdOptions, BindCtx, BindDef};
-use crate::consts::HASH_PREFIX_LEN;
 use crate::inputs::InputsRef;
 use crate::lua::inputs::{inputs_ref_to_lua, lua_value_to_inputs_ref};
-use crate::lua::outputs::parse_outputs;
+use crate::lua::outputs::{outputs_to_lua_table, parse_outputs};
 use crate::manifest::Manifest;
 
 impl LuaUserData for BindCtx {
@@ -129,14 +128,18 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       let destroy_ctx = BindCtx::new();
       let destroy_ctx_userdata = lua.create_userdata(destroy_ctx)?;
 
-      // Reconstruct inputs argument for destroy function
-      let destroy_inputs_arg: LuaValue = match &resolved_inputs {
-        Some(inputs) => inputs_ref_to_lua(lua, inputs, &manifest.borrow())?,
+      // Create outputs argument for destroy function
+      // The outputs contain $${out} placeholders that will be resolved at runtime
+      let destroy_outputs_arg: LuaValue = match &outputs {
+        Some(outs) => {
+          let outputs_table = outputs_to_lua_table(lua, outs)?;
+          LuaValue::Table(outputs_table)
+        }
         None => LuaValue::Table(lua.create_table()?),
       };
 
-      // Call: destroy(inputs, ctx) -> ignored
-      let _: LuaValue = destroy_fn.call((destroy_inputs_arg, &destroy_ctx_userdata))?;
+      // Call: destroy(outputs, ctx) -> ignored
+      let _: LuaValue = destroy_fn.call((destroy_outputs_arg, &destroy_ctx_userdata))?;
 
       let destroy_ctx: BindCtx = destroy_ctx_userdata.take()?;
       let actions = destroy_ctx.into_actions();
@@ -183,9 +186,9 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
     // Convert outputs to Lua table with placeholders for runtime resolution (if present)
     if let Some(ref outs) = outputs {
       let outputs_table = lua.create_table()?;
-      let short_hash = &hash.0[..HASH_PREFIX_LEN.min(hash.0.len())];
+      let hash = &hash.0;
       for k in outs.keys() {
-        let placeholder = format!("$${{bind:{}:{}}}", short_hash, k);
+        let placeholder = format!("$${{bind:{}:{}}}", hash, k);
         outputs_table.set(k.as_str(), placeholder.as_str())?;
       }
       ref_table.set("outputs", outputs_table)?;
@@ -219,6 +222,8 @@ mod tests {
   }
 
   mod sys_bind {
+    use crate::consts::HASH_PREFIX_LEN;
+
     use super::*;
 
     #[test]

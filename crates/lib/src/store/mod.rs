@@ -1,13 +1,24 @@
 //! Store operations for syslua.
 //!
-//! The store is the content-addressed storage for all build outputs.
-//! Objects live in `store/obj/<name>-<version>-<hash>/` and are immutable.
+//! The store is the content-addressed storage for all build outputs and bind state.
+//!
+//! # Layout
+//!
+//! ```text
+//! store/
+//! ├── obj/                    # Build outputs (immutable, content-addressed)
+//! │   └── <name>-<version>-<hash>/
+//! └── bind/                   # Bind state (outputs for destroy)
+//!     └── <hash>/
+//!         └── state.json
+//! ```
+
+pub mod bind;
 
 use std::path::PathBuf;
 
 use crate::bind::BindHash;
 use crate::build::BuildHash;
-use crate::consts::HASH_PREFIX_LEN;
 use crate::platform::paths::store::StorePaths;
 
 /// Generate the store object directory name for a build.
@@ -15,10 +26,10 @@ use crate::platform::paths::store::StorePaths;
 /// Format: `<name>-<version>-<hash>` or `<name>-<hash>` if no version.
 /// Hash is truncated to first 16 characters.
 pub fn build_dir_name(name: &str, version: Option<&str>, hash: &BuildHash) -> String {
-  let short_hash = &hash.0[..HASH_PREFIX_LEN.min(hash.0.len())];
+  let hash = hash.0.as_str();
   match version {
-    Some(v) => format!("{}-{}-{}", name, v, short_hash),
-    None => format!("{}-{}", name, short_hash),
+    Some(v) => format!("{}-{}-{}", name, v, hash),
+    None => format!("{}-{}", name, hash),
   }
 }
 
@@ -36,8 +47,8 @@ pub fn build_path(name: &str, version: Option<&str>, hash: &BuildHash, system: b
 
 /// Generate the store bind directory name for a binding.
 pub fn bind_dir_name(hash: &BindHash) -> String {
-  let short_hash = &hash.0[..HASH_PREFIX_LEN.min(hash.0.len())];
-  short_hash.to_string()
+  let hash = hash.0.as_str();
+  hash.to_string()
 }
 
 pub fn bind_path(hash: &BindHash, system: bool) -> PathBuf {

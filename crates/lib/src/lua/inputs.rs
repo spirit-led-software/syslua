@@ -5,7 +5,6 @@ use mlua::prelude::*;
 use crate::{
   bind::{BIND_REF_TYPE, BindHash},
   build::{BUILD_REF_TYPE, BuildHash},
-  consts::HASH_PREFIX_LEN,
   inputs::InputsRef,
   manifest::Manifest,
 };
@@ -158,10 +157,10 @@ fn build_hash_to_lua(lua: &Lua, hash: &BuildHash, manifest: &Manifest) -> LuaRes
 
   // Generate placeholder outputs from BuildDef
   let outputs = lua.create_table()?;
-  let short_hash = &hash.0[..HASH_PREFIX_LEN.min(hash.0.len())];
+  let hash = &hash.0;
   if let Some(def_outputs) = &build_def.outputs {
     for key in def_outputs.keys() {
-      let placeholder = format!("$${{build:{}:{}}}", short_hash, key);
+      let placeholder = format!("$${{build:{}:{}}}", hash, key);
       outputs.set(key.as_str(), placeholder.as_str())?;
     }
   }
@@ -190,9 +189,9 @@ fn bind_hash_to_lua(lua: &Lua, hash: &BindHash, manifest: &Manifest) -> LuaResul
   // Generate placeholder outputs from BindDef (if present)
   if let Some(def_outputs) = &bind_def.outputs {
     let outputs = lua.create_table()?;
-    let short_hash = &hash.0[..HASH_PREFIX_LEN.min(hash.0.len())];
+    let hash = &hash.0;
     for key in def_outputs.keys() {
-      let placeholder = format!("$${{bind:{}:{}}}", short_hash, key);
+      let placeholder = format!("$${{bind:{}:{}}}", hash, key);
       outputs.set(key.as_str(), placeholder.as_str())?;
     }
     table.set("outputs", outputs)?;

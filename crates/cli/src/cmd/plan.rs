@@ -8,7 +8,6 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use syslua_lib::consts::HASH_PREFIX_LEN;
 use syslua_lib::eval::evaluate_config;
 use syslua_lib::platform::paths;
 
@@ -26,8 +25,7 @@ pub fn cmd_plan(file: &str) -> Result<()> {
   let manifest = evaluate_config(path).with_context(|| format!("Failed to evaluate config: {}", file))?;
 
   // Compute manifest hash (truncated)
-  let full_hash = manifest.compute_hash().context("Failed to compute manifest hash")?;
-  let short_hash = &full_hash[..HASH_PREFIX_LEN];
+  let hash = manifest.compute_hash().context("Failed to compute manifest hash")?;
 
   // Determine base directory based on privileges
   let base_dir = if is_elevated() {
@@ -37,7 +35,7 @@ pub fn cmd_plan(file: &str) -> Result<()> {
   };
 
   // Create plan directory
-  let plan_dir = base_dir.join("plans").join(short_hash);
+  let plan_dir = base_dir.join("plans").join(&hash);
   fs::create_dir_all(&plan_dir).with_context(|| format!("Failed to create plan directory: {}", plan_dir.display()))?;
 
   // Write manifest as pretty-printed JSON
@@ -47,7 +45,7 @@ pub fn cmd_plan(file: &str) -> Result<()> {
     .with_context(|| format!("Failed to write manifest: {}", manifest_path.display()))?;
 
   // Print summary
-  println!("Plan: {}", short_hash);
+  println!("Plan: {}", &hash);
   println!("Builds: {}", manifest.builds.len());
   println!("Binds: {}", manifest.bindings.len());
   println!("Path: {}", manifest_path.display());
