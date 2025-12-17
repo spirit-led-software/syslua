@@ -244,7 +244,7 @@ impl<R: Resolver> Resolver for BindDestroyResolver<'_, R> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::util::testutil::{ECHO_BIN, shell_cmd};
+  use crate::util::testutil::{echo_msg, shell_cmd};
   use crate::{action::actions::cmd::CmdOpts, placeholder::PlaceholderError, util::hash::Hashable};
   use serial_test::serial;
 
@@ -312,11 +312,12 @@ mod tests {
   }
 
   fn make_simple_bind() -> BindDef {
+    let (cmd, args) = echo_msg("applied");
     BindDef {
       inputs: None,
       apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: ECHO_BIN.to_string(),
-        args: Some(vec!["applied".to_string()]),
+        cmd: cmd.to_string(),
+        args: Some(args),
         env: None,
         cwd: None,
       })],
@@ -341,11 +342,12 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn apply_bind_with_outputs() {
+    let (cmd, args) = echo_msg("/path/to/link");
     let bind_def = BindDef {
       inputs: None,
       apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: ECHO_BIN.to_string(),
-        args: Some(vec!["/path/to/link".to_string()]),
+        cmd: cmd.to_string(),
+        args: Some(args),
         env: None,
         cwd: None,
       })],
@@ -363,11 +365,12 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn apply_bind_with_out_placeholder() {
+    let (cmd, args) = echo_msg("$${out}");
     let bind_def = BindDef {
       inputs: None,
       apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: ECHO_BIN.to_string(),
-        args: Some(vec!["$${out}".to_string()]),
+        cmd: cmd.to_string(),
+        args: Some(args),
         env: None,
         cwd: None,
       })],
@@ -393,11 +396,12 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn apply_bind_with_build_dependency() {
+    let (cmd, args) = echo_msg("$${build:abc123:bin}");
     let bind_def = BindDef {
       inputs: None,
       apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: ECHO_BIN.to_string(),
-        args: Some(vec!["$${build:abc123:bin}".to_string()]),
+        cmd: cmd.to_string(),
+        args: Some(args),
         env: None,
         cwd: None,
       })],
@@ -418,11 +422,13 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn destroy_bind_with_actions() {
+    let (apply_cmd, apply_args) = echo_msg("applied");
+    let (destroy_cmd, destroy_args) = echo_msg("destroyed");
     let bind_def = BindDef {
       inputs: None,
       apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: ECHO_BIN.to_string(),
-        args: Some(vec!["applied".to_string()]),
+        cmd: apply_cmd.to_string(),
+        args: Some(apply_args),
         env: None,
         cwd: None,
       })],
@@ -432,8 +438,8 @@ mod tests {
           .collect(),
       ),
       destroy_actions: Some(vec![Action::Cmd(CmdOpts {
-        cmd: ECHO_BIN.to_string(),
-        args: Some(vec!["destroyed".to_string()]),
+        cmd: destroy_cmd.to_string(),
+        args: Some(destroy_args),
         env: None,
         cwd: None,
       })]),
@@ -493,24 +499,27 @@ mod tests {
   #[tokio::test]
   #[serial]
   async fn apply_bind_multiple_actions() {
+    let (cmd1, args1) = echo_msg("step1");
+    let (cmd2, args2) = echo_msg("step2");
+    let (cmd3, args3) = echo_msg("$${action:0} $${action:1}");
     let bind_def = BindDef {
       inputs: None,
       apply_actions: vec![
         Action::Cmd(CmdOpts {
-          cmd: ECHO_BIN.to_string(),
-          args: Some(vec!["step1".to_string()]),
+          cmd: cmd1.to_string(),
+          args: Some(args1),
           env: None,
           cwd: None,
         }),
         Action::Cmd(CmdOpts {
-          cmd: ECHO_BIN.to_string(),
-          args: Some(vec!["step2".to_string()]),
+          cmd: cmd2.to_string(),
+          args: Some(args2),
           env: None,
           cwd: None,
         }),
         Action::Cmd(CmdOpts {
-          cmd: ECHO_BIN.to_string(),
-          args: Some(vec!["$${action:0}".to_string(), "$${action:1}".to_string()]),
+          cmd: cmd3.to_string(),
+          args: Some(args3),
           env: None,
           cwd: None,
         }),

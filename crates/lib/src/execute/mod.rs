@@ -596,7 +596,7 @@ mod tests {
     build::{BuildDef, BuildInputs},
     util::{
       hash::Hashable,
-      testutil::{ECHO_BIN, shell_cmd},
+      testutil::{echo_msg, shell_cmd},
     },
   };
   use serial_test::serial;
@@ -604,13 +604,14 @@ mod tests {
   use tempfile::TempDir;
 
   fn make_build(name: &str, inputs: Option<BuildInputs>) -> BuildDef {
+    let (cmd, args) = echo_msg(name);
     BuildDef {
       name: name.to_string(),
       version: None,
       inputs,
       apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: ECHO_BIN.to_string(),
-        args: Some(vec![name.to_string()]),
+        cmd: cmd.to_string(),
+        args: Some(args),
         env: None,
         cwd: None,
       })],

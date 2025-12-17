@@ -108,7 +108,7 @@ pub async fn execute_action(
 mod tests {
   use super::*;
   use crate::placeholder::PlaceholderError;
-  use crate::util::testutil::{ECHO_BIN, shell_echo_env};
+  use crate::util::testutil::{echo_msg, shell_echo_env};
   use tempfile::TempDir;
 
   /// Simple test resolver that returns fixed values.
@@ -165,9 +165,10 @@ mod tests {
     let out_dir = temp_dir.path();
     let resolver = TestResolver::new(out_dir.to_str().unwrap());
 
+    let (cmd, args) = echo_msg("hello");
     let action = Action::Cmd(CmdOpts {
-      cmd: ECHO_BIN.to_string(),
-      args: Some(vec!["hello".to_string()]),
+      cmd: cmd.to_string(),
+      args: Some(args),
       env: None,
       cwd: None,
     });
@@ -183,9 +184,10 @@ mod tests {
     let out_dir = temp_dir.path();
     let resolver = TestResolver::new(out_dir.to_str().unwrap());
 
+    let (cmd, args) = echo_msg("$${out}");
     let action = Action::Cmd(CmdOpts {
-      cmd: ECHO_BIN.to_string(),
-      args: Some(vec!["$${out}".to_string()]),
+      cmd: cmd.to_string(),
+      args: Some(args),
       env: None,
       cwd: None,
     });
@@ -201,9 +203,10 @@ mod tests {
     let out_dir = temp_dir.path();
     let resolver = TestResolver::new(out_dir.to_str().unwrap()).with_action("/path/to/file.tar.gz");
 
+    let (cmd, args) = echo_msg("$${action:0}");
     let action = Action::Cmd(CmdOpts {
-      cmd: ECHO_BIN.to_string(),
-      args: Some(vec!["$${action:0}".to_string()]),
+      cmd: cmd.to_string(),
+      args: Some(args),
       env: None,
       cwd: None,
     });

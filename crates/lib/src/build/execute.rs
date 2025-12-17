@@ -413,7 +413,7 @@ fn resolve_outputs_with_resolver(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::util::testutil::{ECHO_BIN, shell_cmd};
+  use crate::util::testutil::{echo_msg, shell_cmd};
   use crate::{
     action::{Action, actions::cmd::CmdOpts},
     util::hash::Hashable,
@@ -422,13 +422,14 @@ mod tests {
   use tempfile::TempDir;
 
   fn make_simple_build() -> BuildDef {
+    let (cmd, args) = echo_msg("hello");
     BuildDef {
       name: "test-build".to_string(),
       version: Some("1.0.0".to_string()),
       inputs: None,
       apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: ECHO_BIN.to_string(),
-        args: Some(vec!["hello".to_string()]),
+        cmd: cmd.to_string(),
+        args: Some(args),
         env: None,
         cwd: None,
       })],
@@ -498,13 +499,14 @@ mod tests {
   #[serial]
   fn realize_build_with_custom_outputs() {
     with_temp_store(|| async {
+      let (cmd, args) = echo_msg("/path/to/binary");
       let build_def = BuildDef {
         name: "test-build".to_string(),
         version: Some("1.0.0".to_string()),
         inputs: None,
         apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: ECHO_BIN.to_string(),
-          args: Some(vec!["/path/to/binary".to_string()]),
+          cmd: cmd.to_string(),
+          args: Some(args),
           env: None,
           cwd: None,
         })],
@@ -541,27 +543,30 @@ mod tests {
   #[serial]
   fn realize_build_with_multiple_actions() {
     with_temp_store(|| async {
+      let (cmd1, args1) = echo_msg("step1");
+      let (cmd2, args2) = echo_msg("step2");
+      let (cmd3, args3) = echo_msg("$${action:0} $${action:1}");
       let build_def = BuildDef {
         name: "multi-action".to_string(),
         version: None,
         inputs: None,
         apply_actions: vec![
           Action::Cmd(CmdOpts {
-            cmd: ECHO_BIN.to_string(),
-            args: Some(vec!["step1".to_string()]),
+            cmd: cmd1.to_string(),
+            args: Some(args1),
             env: None,
             cwd: None,
           }),
           Action::Cmd(CmdOpts {
-            cmd: ECHO_BIN.to_string(),
-            args: Some(vec!["step2".to_string()]),
+            cmd: cmd2.to_string(),
+            args: Some(args2),
             env: None,
             cwd: None,
           }),
           Action::Cmd(CmdOpts {
             // Reference previous action output
-            cmd: ECHO_BIN.to_string(),
-            args: Some(vec!["$${action:0}".to_string(), "$${action:1}".to_string()]),
+            cmd: cmd3.to_string(),
+            args: Some(args3),
             env: None,
             cwd: None,
           }),

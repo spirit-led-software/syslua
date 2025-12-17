@@ -43,14 +43,16 @@ pub fn touch_file(filename: &str) -> (&'static str, Vec<String>) {
   )
 }
 
-/// Path to the echo binary.
+/// Returns the command and args to echo a message.
+///
+/// On Unix, this uses /bin/echo directly.
+/// On Windows, echo is a shell builtin, so we wrap it in cmd.exe.
 #[cfg(unix)]
-pub const ECHO_BIN: &str = "/bin/echo";
+pub fn echo_msg(msg: &str) -> (&'static str, Vec<String>) {
+  ("/bin/echo", vec![msg.to_string()])
+}
 
-/// Returns echo command and args for Windows (echo is a shell builtin).
 #[cfg(windows)]
-pub fn echo_with_msg(msg: &str) -> (&'static str, Vec<String>) {
-  // Escape quotes in message for cmd.exe
-  let escaped = msg.replace("\"", "\\\"");
-  ("cmd.exe", vec!["/C".to_string(), format!("echo {}", escaped)])
+pub fn echo_msg(msg: &str) -> (&'static str, Vec<String>) {
+  ("cmd.exe", vec!["/C".to_string(), format!("echo {}", msg)])
 }

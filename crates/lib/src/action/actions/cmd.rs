@@ -237,7 +237,7 @@ pub async fn execute_cmd(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::util::testutil::{ECHO_BIN, shell_cmd, shell_echo_env, touch_file};
+  use crate::util::testutil::{echo_msg, shell_cmd, shell_echo_env, touch_file};
   use tempfile::TempDir;
 
   #[tokio::test]
@@ -245,9 +245,8 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    let result = execute_cmd(ECHO_BIN, Some(&vec!["hello".to_string()]), None, None, out_dir)
-      .await
-      .unwrap();
+    let (cmd, args) = echo_msg("hello");
+    let result = execute_cmd(cmd, Some(&args), None, None, out_dir).await.unwrap();
 
     assert_eq!(result, "hello");
   }
