@@ -1,0 +1,132 @@
+name: Release PR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.2.0, without v prefix)'
+        required: true
+        type: string
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-pr:
+    name: Create Release PR
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          if ! echo "${{ inputs.version }}" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "Error: Version must be in semver format (e.g., 0.2.0 or 0.2.0-beta.1)"
+            exit 1
+          fi
+
+      - name: Install git-cliff
+        run: cargo install git-cliff
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create release branch
+        run: git checkout -b release/v${{ inputs.version }}
+
+      - name: Update version in Cargo.toml files
+        run: |
+          # Update workspace Cargo.toml
+          sed -i 's/^version = "[^"]*"/version = "${{ inputs.version }}"/' Cargo.toml
+
+          # Update crate versions
+          sed -i 's/^version = "[^"]*"/version = "${{ inputs.version }}"/' crates/lib/Cargo.toml
+          sed -i 's/^version = "[^"]*"/version = "${{ inputs.version }}"/' crates/cli/Cargo.toml
+
+          # Update internal dependency versions
+          sed -i 's/syslua-lib = { path = "..\/lib", version = "[^"]*"/syslua-lib = { path = "..\/lib", version = "${{ inputs.version }}"/' crates/cli/Cargo.toml
+
+          # Show changes
+          git diff
+
+      - name: Update Cargo.lock
+        run: cargo update -w
+
+      - name: Generate changelog
+        run: |
+          # Generate changelog for the new version
+          git-cliff --tag v${{ inputs.version }} -o CHANGELOG.md
+
+      - name: Commit changes
+        run: |
+          git add -A
+          git commit -m "chore: release v${{ inputs.version }}"
+
+      - name: Push branch
+        run: git push -u origin release/v${{ inputs.version }}
+
+      - name: Create Pull Request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Extract changelog for this version to use as PR body
+          CHANGELOG_BODY=$(git-cliff --tag v${{ inputs.version }} --unreleased --strip header)
+
+          gh pr create \
+            --title "Release v${{ inputs.version }}" \
+            --body "## Release v${{ inputs.version }}
+
+          This PR prepares the release of version ${{ inputs.version }}.
+
+          ### Changes
+
+          ${CHANGELOG_BODY}
+
+          ---
+
+          Once merged, the release will be automatically tagged and built." \
+            --base main \
+            --head release/v${{ inputs.version }}
+
+  tag-release:
+    name: Tag Release
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'release/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from branch name
+        id: version
+        run: |
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          VERSION="${BRANCH#release/}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Extracted version: ${VERSION}"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Create and push tag
+        run: |
+          git tag ${{ steps.version.outputs.version }}
+          git push origin ${{ steps.version.outputs.version }}
+          echo "Created and pushed tag: ${{ steps.version.outputs.version }}"

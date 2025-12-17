@@ -1,16 +1,17 @@
-//! CLI smoke tests for syslua-cli.
+//! CLI smoke tests for sys.
 //!
 //! These tests verify that all CLI commands run without panicking and
 //! return appropriate exit codes.
 
-use assert_cmd::{Command, cargo::cargo_bin_cmd};
+use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use serial_test::serial;
 use tempfile::TempDir;
 
-/// Get a Command for the syslua-cli binary.
-fn syslua_cmd() -> Command {
-  cargo_bin_cmd!("syslua-cli")
+/// Get a Command for the sys binary.
+fn sys_cmd() -> Command {
+  cargo_bin_cmd!("sys")
 }
 
 /// Create a temp directory with a config file.
@@ -50,7 +51,7 @@ return {
 
 #[test]
 fn help_flag_works() {
-  syslua_cmd()
+  sys_cmd()
     .arg("--help")
     .assert()
     .success()
@@ -59,7 +60,7 @@ fn help_flag_works() {
 
 #[test]
 fn version_flag_works() {
-  syslua_cmd()
+  sys_cmd()
     .arg("--version")
     .assert()
     .success()
@@ -69,7 +70,7 @@ fn version_flag_works() {
 #[test]
 fn subcommand_help_works() {
   for cmd in &["apply", "plan", "destroy", "init", "update", "info"] {
-    syslua_cmd()
+    sys_cmd()
       .arg(cmd)
       .arg("--help")
       .assert()
@@ -88,7 +89,7 @@ fn init_creates_config_files() {
   let temp = TempDir::new().unwrap();
   let init_dir = temp.path().join("myconfig");
 
-  syslua_cmd()
+  sys_cmd()
     .arg("init")
     .arg(&init_dir)
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -104,7 +105,7 @@ fn init_creates_config_files() {
 fn init_fails_if_config_exists() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  syslua_cmd()
+  sys_cmd()
     .arg("init")
     .arg(temp.path())
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -122,7 +123,7 @@ fn init_fails_if_config_exists() {
 fn plan_with_minimal_config() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  syslua_cmd()
+  sys_cmd()
     .arg("plan")
     .arg(temp.path().join("init.lua"))
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -135,7 +136,7 @@ fn plan_with_minimal_config() {
 fn plan_with_build_shows_build_count() {
   let temp = temp_config(BUILD_CONFIG);
 
-  syslua_cmd()
+  sys_cmd()
     .arg("plan")
     .arg(temp.path().join("init.lua"))
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -149,7 +150,7 @@ fn plan_with_build_shows_build_count() {
 fn plan_nonexistent_config_fails() {
   let temp = TempDir::new().unwrap();
 
-  syslua_cmd()
+  sys_cmd()
     .arg("plan")
     .arg("/nonexistent/path/config.lua")
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -166,7 +167,7 @@ fn plan_nonexistent_config_fails() {
 fn apply_minimal_config() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  syslua_cmd()
+  sys_cmd()
     .arg("apply")
     .arg(temp.path().join("init.lua"))
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -180,7 +181,7 @@ fn apply_minimal_config() {
 fn apply_with_build_succeeds() {
   let temp = temp_config(BUILD_CONFIG);
 
-  syslua_cmd()
+  sys_cmd()
     .arg("apply")
     .arg(temp.path().join("init.lua"))
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -195,7 +196,7 @@ fn apply_with_build_succeeds() {
 fn apply_nonexistent_config_fails() {
   let temp = TempDir::new().unwrap();
 
-  syslua_cmd()
+  sys_cmd()
     .arg("apply")
     .arg("/nonexistent/path/config.lua")
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -213,7 +214,7 @@ fn destroy_placeholder_works() {
   // destroy is currently a placeholder that just prints a message
   let temp = TempDir::new().unwrap();
 
-  syslua_cmd()
+  sys_cmd()
     .arg("destroy")
     .arg(temp.path().join("init.lua"))
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -231,7 +232,7 @@ fn destroy_placeholder_works() {
 fn update_with_no_inputs() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  syslua_cmd()
+  sys_cmd()
     .arg("update")
     .arg(temp.path().join("init.lua"))
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -245,7 +246,7 @@ fn update_with_no_inputs() {
 fn update_dry_run() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  syslua_cmd()
+  sys_cmd()
     .arg("update")
     .arg(temp.path().join("init.lua"))
     .arg("--dry-run")
@@ -262,7 +263,7 @@ fn update_dry_run() {
 #[test]
 #[serial]
 fn info_shows_platform() {
-  syslua_cmd()
+  sys_cmd()
     .arg("info")
     .assert()
     .success()
@@ -278,7 +279,7 @@ fn info_shows_platform() {
 fn invalid_lua_syntax_fails() {
   let temp = temp_config("this is not valid lua {{{");
 
-  syslua_cmd()
+  sys_cmd()
     .arg("plan")
     .arg(temp.path().join("init.lua"))
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
@@ -291,7 +292,7 @@ fn invalid_lua_syntax_fails() {
 fn missing_setup_function_fails() {
   let temp = temp_config("return { inputs = {} }");
 
-  syslua_cmd()
+  sys_cmd()
     .arg("plan")
     .arg(temp.path().join("init.lua"))
     .env("SYSLUA_USER_STORE", temp.path().join("store"))
