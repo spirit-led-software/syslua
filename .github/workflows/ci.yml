@@ -30,7 +30,6 @@ jobs:
 
   lint-and-test:
     name: Lint & Test (${{ matrix.os }})
-    needs: fmt
     strategy:
       fail-fast: false
       matrix:
