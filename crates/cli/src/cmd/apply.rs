@@ -29,11 +29,7 @@ pub fn cmd_apply(file: &str) -> Result<()> {
   let system = platform::is_elevated();
 
   let options = ApplyOptions {
-    execute: ExecuteConfig {
-      parallelism: 4,
-      system,
-      shell: None,
-    },
+    execute: ExecuteConfig { parallelism: 4, system },
     system,
     dry_run: false,
   };

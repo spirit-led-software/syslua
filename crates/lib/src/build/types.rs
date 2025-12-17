@@ -13,7 +13,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::util::hash::{Hashable, ObjectHash};
+use crate::{
+  action::Action,
+  util::hash::{Hashable, ObjectHash},
+};
 
 /// Marker type name for BuildRef metatables in Lua.
 ///
@@ -77,46 +80,6 @@ pub enum BuildInputs {
   Build(ObjectHash),
 }
 
-/// An action that can be performed during build execution.
-///
-/// Build actions are the primitive operations that builds can perform.
-/// They are recorded during [`BuildCtx`] method calls and stored in [`BuildDef`].
-///
-/// # Variants
-///
-/// - [`FetchUrl`](BuildAction::FetchUrl): Download a file with integrity verification
-/// - [`Cmd`](BuildAction::Cmd): Execute a shell command
-///
-/// # Placeholder Resolution
-///
-/// When actions are executed, their outputs are captured and can be referenced
-/// by subsequent actions via placeholders (e.g., `$${action:0}`).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum BuildAction {
-  /// Fetch a URL with SHA-256 integrity verification.
-  ///
-  /// This is a built-in action to avoid bootstrap problems (e.g., needing curl
-  /// to build curl). The runtime handles the download directly.
-  ///
-  /// # Fields
-  ///
-  /// - `url`: The URL to download
-  /// - `sha256`: Expected SHA-256 hash of the downloaded content (lowercase hex)
-  FetchUrl { url: String, sha256: String },
-  /// Execute a shell command.
-  ///
-  /// # Fields
-  ///
-  /// - `cmd`: The command string to execute (passed to shell)
-  /// - `env`: Optional environment variables to set
-  /// - `cwd`: Optional working directory (may contain placeholders)
-  Cmd {
-    cmd: String,
-    env: Option<BTreeMap<String, String>>,
-    cwd: Option<String>,
-  },
-}
-
 /// The evaluated, serializable definition of a build.
 ///
 /// This is the manifest-side representation produced by evaluating a [`BuildSpec`].
@@ -145,197 +108,19 @@ pub struct BuildDef {
   /// Resolved inputs (with BuildRef/BindRef converted to hashes).
   pub inputs: Option<BuildInputs>,
   /// The sequence of actions to execute during `apply`.
-  pub apply_actions: Vec<BuildAction>,
+  pub apply_actions: Vec<Action>,
   /// Named outputs from the build (e.g., `{"out": "$${action:2}", "bin": "..."}`).
   pub outputs: Option<BTreeMap<String, String>>,
 }
 
 impl Hashable for BuildDef {}
 
-/// Options for executing a shell command in a build.
-///
-/// This is a builder-pattern struct for configuring [`BuildAction::Cmd`] actions.
-/// It can be constructed from a string slice for simple commands.
-///
-/// # Example
-///
-/// ```ignore
-/// // Simple command
-/// ctx.cmd("make install");
-///
-/// // With environment and working directory
-/// ctx.cmd(
-///     BuildCmdOptions::new("make")
-///         .with_env(env)
-///         .with_cwd("/build")
-/// );
-/// ```
-pub struct BuildCmdOpts {
-  /// The command string to execute.
-  pub cmd: String,
-  /// Optional environment variables to set.
-  pub env: Option<BTreeMap<String, String>>,
-  /// Optional working directory.
-  pub cwd: Option<String>,
-}
-
-impl BuildCmdOpts {
-  /// Create a new command with default options.
-  pub fn new(cmd: &str) -> Self {
-    Self {
-      cmd: cmd.to_string(),
-      env: None,
-      cwd: None,
-    }
-  }
-
-  /// Set environment variables for the command.
-  pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
-    self.env = Some(env);
-    self
-  }
-
-  /// Set the working directory for the command.
-  pub fn with_cwd(mut self, cwd: &str) -> Self {
-    self.cwd = Some(cwd.to_string());
-    self
-  }
-}
-
-impl From<&str> for BuildCmdOpts {
-  fn from(cmd: &str) -> Self {
-    BuildCmdOpts::new(cmd)
-  }
-}
-
-/// Context passed to build `apply` functions for recording actions.
-///
-/// When a [`BuildSpec::apply`] function is called, it receives a `BuildCtx`.
-/// The Lua code calls methods on this context to record build actions, which
-/// are later stored in the [`BuildDef`].
-///
-/// # Action Recording
-///
-/// Each method call (e.g., [`fetch_url`](Self::fetch_url), [`cmd`](Self::cmd))
-/// appends an action to the internal list and returns a placeholder string.
-/// These placeholders can be used in subsequent actions or stored in outputs.
-///
-/// # Placeholder Format
-///
-/// Methods return opaque placeholder strings like `$${action:0}`, `$${action:1}`, etc.
-/// Users should not construct these manually - they're implementation details.
-///
-/// # Example (Lua)
-///
-/// ```lua
-/// sys.build {
-///     name = "ripgrep",
-///     apply = function(ctx)
-///         local archive = ctx:fetch_url("https://...", "sha256...")
-///         ctx:cmd("tar xf " .. archive)
-///         return { out = ctx:cmd("...") }
-///     end
-/// }
-/// ```
-#[derive(Default)]
-pub struct BuildCtx {
-  /// The recorded actions, in order.
-  actions: Vec<BuildAction>,
-}
-
-impl BuildCtx {
-  /// Create a new empty build context.
-  pub fn new() -> Self {
-    Self { actions: Vec::new() }
-  }
-
-  /// Returns a placeholder string that resolves to the build's output directory.
-  ///
-  /// This should be used in commands and outputs to reference where the build
-  /// should write its artifacts. At execution time, this placeholder resolves
-  /// to the actual store path (e.g., `/syslua/store/obj/ripgrep-15.1.0-abc123/`).
-  ///
-  /// # Returns
-  ///
-  /// The string `"$${out}"` which is substituted at execution time.
-  ///
-  /// # Example (Lua)
-  ///
-  /// ```lua
-  /// sys.build {
-  ///     name = "my-tool",
-  ///     apply = function(inputs, ctx)
-  ///         ctx:cmd("mkdir -p " .. ctx.out .. "/bin")
-  ///         ctx:cmd("cp binary " .. ctx.out .. "/bin/")
-  ///         return { out = ctx.out }
-  ///     end
-  /// }
-  /// ```
-  pub fn out(&self) -> &'static str {
-    "$${out}"
-  }
-
-  /// Record a URL fetch action and return a placeholder for its output.
-  ///
-  /// The returned placeholder resolves to the path of the downloaded file
-  /// at execution time.
-  ///
-  /// # Arguments
-  ///
-  /// - `url`: The URL to download
-  /// - `sha256`: Expected SHA-256 hash (lowercase hex) for integrity verification
-  ///
-  /// # Returns
-  ///
-  /// An opaque placeholder string (e.g., `$${action:0}`) that resolves to
-  /// the downloaded file path at execution time.
-  pub fn fetch_url(&mut self, url: &str, sha256: &str) -> String {
-    let output = format!("$${{action:{}}}", self.actions.len());
-    self.actions.push(BuildAction::FetchUrl {
-      url: url.to_string(),
-      sha256: sha256.to_string(),
-    });
-    output
-  }
-
-  /// Record a command execution action and return a placeholder for its output.
-  ///
-  /// The returned placeholder resolves to the command's stdout at execution time.
-  ///
-  /// # Arguments
-  ///
-  /// - `opts`: Command options (can be a string slice for simple commands)
-  ///
-  /// # Returns
-  ///
-  /// An opaque placeholder string (e.g., `$${action:1}`) that resolves to
-  /// the command's output at execution time.
-  pub fn cmd(&mut self, opts: impl Into<BuildCmdOpts>) -> String {
-    let output = format!("$${{action:{}}}", self.actions.len());
-    let opts = opts.into();
-    self.actions.push(BuildAction::Cmd {
-      cmd: opts.cmd,
-      env: opts.env,
-      cwd: opts.cwd,
-    });
-    output
-  }
-
-  /// Consume the context and return the recorded actions.
-  ///
-  /// This is called after the `apply` function completes to extract
-  /// the actions for storage in [`BuildDef::apply_actions`].
-  pub fn into_actions(self) -> Vec<BuildAction> {
-    self.actions
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
 
   mod build_def {
-    use crate::consts::OBJ_HASH_PREFIX_LEN;
+    use crate::{action::actions::cmd::CmdOpts, consts::OBJ_HASH_PREFIX_LEN};
 
     use super::*;
 
@@ -344,7 +129,7 @@ mod tests {
         name: "ripgrep".to_string(),
         version: Some("15.1.0".to_string()),
         inputs: None,
-        apply_actions: vec![BuildAction::FetchUrl {
+        apply_actions: vec![Action::FetchUrl {
           url: "https://example.com/rg.tar.gz".to_string(),
           sha256: "abc123".to_string(),
         }],
@@ -384,11 +169,12 @@ mod tests {
       let def1 = simple_def();
 
       let mut def2 = simple_def();
-      def2.apply_actions.push(BuildAction::Cmd {
+      def2.apply_actions.push(Action::Cmd(CmdOpts {
         cmd: "make".to_string(),
+        args: None,
         env: None,
         cwd: None,
-      });
+      }));
 
       assert_ne!(def1.compute_hash().unwrap(), def2.compute_hash().unwrap());
     }
@@ -402,16 +188,18 @@ mod tests {
         version: None,
         inputs: None,
         apply_actions: vec![
-          BuildAction::Cmd {
+          Action::Cmd(CmdOpts {
             cmd: "step1".to_string(),
+            args: None,
             env: None,
             cwd: None,
-          },
-          BuildAction::Cmd {
+          }),
+          Action::Cmd(CmdOpts {
             cmd: "step2".to_string(),
+            args: None,
             env: None,
             cwd: None,
-          },
+          }),
         ],
         outputs: None,
       };
@@ -421,16 +209,18 @@ mod tests {
         version: None,
         inputs: None,
         apply_actions: vec![
-          BuildAction::Cmd {
+          Action::Cmd(CmdOpts {
             cmd: "step2".to_string(),
+            args: None,
             env: None,
             cwd: None,
-          },
-          BuildAction::Cmd {
+          }),
+          Action::Cmd(CmdOpts {
             cmd: "step1".to_string(),
+            args: None,
             env: None,
             cwd: None,
-          },
+          }),
         ],
         outputs: None,
       };
@@ -448,15 +238,16 @@ mod tests {
         version: Some("1.0.0".to_string()),
         inputs: Some(BuildInputs::String("test".to_string())),
         apply_actions: vec![
-          BuildAction::FetchUrl {
+          Action::FetchUrl {
             url: "https://example.com/src.tar.gz".to_string(),
             sha256: "abc123".to_string(),
           },
-          BuildAction::Cmd {
+          Action::Cmd(CmdOpts {
             cmd: "make".to_string(),
+            args: Some(vec!["install".to_string()]),
             env: Some(env),
             cwd: Some("/build".to_string()),
-          },
+          }),
         ],
         outputs: Some(BTreeMap::from([("out".to_string(), "$${action:1}".to_string())])),
       };
@@ -465,49 +256,6 @@ mod tests {
       let deserialized: BuildDef = serde_json::from_str(&json).unwrap();
 
       assert_eq!(def, deserialized);
-    }
-  }
-
-  mod build_ctx {
-    use super::*;
-
-    #[test]
-    fn actions_return_sequential_placeholders() {
-      let mut ctx = BuildCtx::new();
-
-      let p0 = ctx.fetch_url("https://example.com/a.tar.gz", "hash1");
-      let p1 = ctx.cmd("tar xf a.tar.gz");
-      let p2 = ctx.fetch_url("https://example.com/b.tar.gz", "hash2");
-
-      // All actions use the same placeholder format with sequential indices
-      assert_eq!(p0, "$${action:0}");
-      assert_eq!(p1, "$${action:1}");
-      assert_eq!(p2, "$${action:2}");
-    }
-
-    #[test]
-    fn cmd_preserves_env_and_cwd() {
-      let mut ctx = BuildCtx::new();
-      let mut env = BTreeMap::new();
-      env.insert("CC".to_string(), "clang".to_string());
-
-      ctx.cmd(BuildCmdOpts::new("make").with_env(env.clone()).with_cwd("/build"));
-
-      let actions = ctx.into_actions();
-      assert_eq!(actions.len(), 1);
-
-      match &actions[0] {
-        BuildAction::Cmd {
-          cmd,
-          env: action_env,
-          cwd,
-        } => {
-          assert_eq!(cmd, "make");
-          assert_eq!(action_env, &Some(env));
-          assert_eq!(cwd, &Some("/build".to_string()));
-        }
-        _ => panic!("Expected Cmd action"),
-      }
     }
   }
 }

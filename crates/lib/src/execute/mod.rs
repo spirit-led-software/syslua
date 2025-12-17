@@ -7,7 +7,6 @@
 //! - Failure propagation and skip tracking
 //! - Atomic rollback of binds on failure
 
-pub mod actions;
 pub mod apply;
 pub mod dag;
 pub mod resolver;
@@ -18,7 +17,11 @@ use std::collections::{HashMap, HashSet};
 use tokio::sync::Semaphore;
 use tracing::{debug, error, info, warn};
 
-use crate::{manifest::Manifest, util::hash::ObjectHash};
+use crate::{
+  bind::execute::{apply_bind, destroy_bind},
+  manifest::Manifest,
+  util::hash::ObjectHash,
+};
 
 use dag::DagNode;
 use resolver::ExecutionResolver;
@@ -418,7 +421,7 @@ async fn execute_bind_wave(
         config.system,
       );
 
-      let result = crate::bind::execute::apply_bind(&hash, bind_def, &resolver, &config).await;
+      let result = apply_bind(&hash, bind_def, &resolver).await;
 
       Ok::<_, ExecuteError>((hash, result))
     });
@@ -501,7 +504,7 @@ async fn rollback_binds(
       && let Some(bind_result) = applied_results.get(hash)
     {
       info!(bind = %hash.0, "destroying bind");
-      if let Err(e) = crate::bind::execute::destroy_bind(hash, bind_def, bind_result, &resolver, config).await {
+      if let Err(e) = destroy_bind(hash, bind_def, bind_result, &resolver).await {
         // Log but continue - we want to try to rollback as much as possible
         error!(bind = %hash.0, error = %e, "failed to destroy bind during rollback");
       }
@@ -588,9 +591,13 @@ pub async fn execute_single_build(
 mod tests {
   use super::*;
   use crate::{
+    action::{Action, actions::cmd::CmdOpts},
     bind::BindInputs,
-    build::{BuildAction, BuildDef, BuildInputs},
-    util::hash::Hashable,
+    build::{BuildDef, BuildInputs},
+    util::{
+      hash::Hashable,
+      testutil::{ECHO_BIN, shell_cmd},
+    },
   };
   use serial_test::serial;
   use std::collections::BTreeMap;
@@ -601,11 +608,12 @@ mod tests {
       name: name.to_string(),
       version: None,
       inputs,
-      apply_actions: vec![BuildAction::Cmd {
-        cmd: format!("echo {}", name),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: ECHO_BIN.to_string(),
+        args: Some(vec![name.to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: None,
     }
   }
@@ -614,7 +622,6 @@ mod tests {
     ExecuteConfig {
       parallelism: 4,
       system: false,
-      shell: None,
     }
   }
 
@@ -636,33 +643,36 @@ mod tests {
     })
   }
 
-  /// Returns a command that creates an empty file at the given path.
+  /// Returns a command and args to create an empty file at the given path.
   /// Unix: /usr/bin/touch {path}
-  /// Windows: copy nul "{path}"
+  /// Windows: cmd /C copy nul "{path}"
   #[cfg(unix)]
-  fn touch_cmd(path: &std::path::Path) -> String {
-    format!("/usr/bin/touch {}", path.display())
+  fn touch_cmd(path: &std::path::Path) -> (String, Vec<String>) {
+    ("/usr/bin/touch".to_string(), vec![path.display().to_string()])
   }
 
   #[cfg(windows)]
-  fn touch_cmd(path: &std::path::Path) -> String {
-    // Use 'copy /y nul' to create an empty file
-    // The /y flag suppresses overwrite prompts
-    // We avoid redirection (>nul) which can conflict with quoted paths
-    format!("copy /y nul \"{}\"", path.display())
+  fn touch_cmd(path: &std::path::Path) -> (String, Vec<String>) {
+    // Use 'copy /y nul' to create an empty file, wrapped in shell
+    let (cmd, args) = shell_cmd(&format!("copy /y nul \"{}\"", path.display()));
+    (cmd.to_string(), args)
   }
 
-  /// Returns a command that removes a file at the given path.
+  /// Returns a command and args to remove a file at the given path.
   /// Unix: /bin/rm -f {path}
-  /// Windows: del /f /q "{path}" 2>nul
+  /// Windows: cmd /C del /f /q "{path}"
   #[cfg(unix)]
-  fn rm_cmd(path: &std::path::Path) -> String {
-    format!("/bin/rm -f {}", path.display())
+  fn rm_cmd(path: &std::path::Path) -> (String, Vec<String>) {
+    (
+      "/bin/rm".to_string(),
+      vec!["-f".to_string(), path.display().to_string()],
+    )
   }
 
   #[cfg(windows)]
-  fn rm_cmd(path: &std::path::Path) -> String {
-    format!("del /f /q \"{}\" 2>nul", path.display())
+  fn rm_cmd(path: &std::path::Path) -> (String, Vec<String>) {
+    let (cmd, args) = shell_cmd(&format!("del /f /q \"{}\" 2>nul", path.display()));
+    (cmd.to_string(), args)
   }
 
   #[test]
@@ -754,15 +764,17 @@ mod tests {
   #[serial]
   fn execute_failing_build() {
     with_temp_store(|| async {
+      let (cmd, args) = shell_cmd("exit 1");
       let build = BuildDef {
         name: "failing".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![BuildAction::Cmd {
-          cmd: "exit 1".to_string(),
+        apply_actions: vec![Action::Cmd(CmdOpts {
+          cmd: cmd.to_string(),
+          args: Some(args),
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: None,
       };
       let hash = build.compute_hash().unwrap();
@@ -785,15 +797,17 @@ mod tests {
   fn execute_skip_dependent_on_failure() {
     with_temp_store(|| async {
       // A fails, B depends on A -> B should be skipped
+      let (cmd, args) = shell_cmd("exit 1");
       let build_a = BuildDef {
         name: "a".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![BuildAction::Cmd {
-          cmd: "exit 1".to_string(),
+        apply_actions: vec![Action::Cmd(CmdOpts {
+          cmd: cmd.to_string(),
+          args: Some(args),
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: None,
       };
       let hash_a = build_a.compute_hash().unwrap();
@@ -861,16 +875,18 @@ mod tests {
   // execute_manifest() tests - unified build + bind execution
   // ============================================================
 
-  use crate::bind::{BindAction, BindDef};
+  use crate::bind::BindDef;
 
-  fn make_bind(cmd: &str, inputs: Option<BindInputs>) -> BindDef {
+  fn make_bind(script: &str, inputs: Option<BindInputs>) -> BindDef {
+    let (cmd, args) = shell_cmd(script);
     BindDef {
       inputs,
-      apply_actions: vec![BindAction::Cmd {
+      apply_actions: vec![Action::Cmd(CmdOpts {
         cmd: cmd.to_string(),
+        args: Some(args),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: None,
       destroy_actions: None,
     }
@@ -938,28 +954,32 @@ mod tests {
     // Bind uses $${build:hash:out} placeholder that should resolve to build output
     with_temp_store(|| async {
       // Build that produces an output
+      let (echo_cmd, echo_args) = shell_cmd("echo built");
       let build = BuildDef {
         name: "provider".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![BuildAction::Cmd {
-          cmd: "echo built".to_string(),
+        apply_actions: vec![Action::Cmd(CmdOpts {
+          cmd: echo_cmd.to_string(),
+          args: Some(echo_args),
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: Some([("bin".to_string(), "$${out}/bin".to_string())].into_iter().collect()),
       };
       let build_hash = build.compute_hash().unwrap();
 
       // Bind that references the build output via placeholder
       // Using the full hash in the command to test placeholder resolution
+      let (bind_cmd, bind_args) = shell_cmd(&format!("echo using $$${{build:{}:bin}}", build_hash.0));
       let bind = BindDef {
         inputs: Some(BindInputs::Build(build_hash.clone())),
-        apply_actions: vec![BindAction::Cmd {
-          cmd: format!("echo using $$${{build:{}:bin}}", build_hash.0),
+        apply_actions: vec![Action::Cmd(CmdOpts {
+          cmd: bind_cmd.to_string(),
+          args: Some(bind_args),
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: None,
         destroy_actions: None,
       };
@@ -993,42 +1013,46 @@ mod tests {
       let marker_file = temp_dir.path().join("bind_a_applied");
 
       // Debug logging for Windows path issues
-      let touch = touch_cmd(&marker_file);
-      let rm = rm_cmd(&marker_file);
+      let (touch_cmd_str, touch_args) = touch_cmd(&marker_file);
+      let (rm_cmd_str, rm_args) = rm_cmd(&marker_file);
       eprintln!("=== DEBUG: manifest_bind_failure_rollback ===");
       eprintln!("temp_dir: {:?}", temp_dir.path());
       eprintln!("temp_dir length: {}", temp_dir.path().display().to_string().len());
       eprintln!("marker_file: {:?}", marker_file);
       eprintln!("marker_file length: {}", marker_file.display().to_string().len());
-      eprintln!("touch_cmd: {}", touch);
-      eprintln!("rm_cmd: {}", rm);
+      eprintln!("touch_cmd: {} {:?}", touch_cmd_str, touch_args);
+      eprintln!("rm_cmd: {} {:?}", rm_cmd_str, rm_args);
       eprintln!("==============================================");
 
       // Use platform-specific commands since PATH is isolated
       let bind_a = BindDef {
         inputs: None,
-        apply_actions: vec![BindAction::Cmd {
-          cmd: touch,
+        apply_actions: vec![Action::Cmd(CmdOpts {
+          cmd: touch_cmd_str,
+          args: Some(touch_args),
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: None,
-        destroy_actions: Some(vec![BindAction::Cmd {
-          cmd: rm,
+        destroy_actions: Some(vec![Action::Cmd(CmdOpts {
+          cmd: rm_cmd_str,
+          args: Some(rm_args),
           env: None,
           cwd: None,
-        }]),
+        })]),
       };
       let hash_a = bind_a.compute_hash().unwrap();
 
       // Bind B depends on A and fails
+      let (exit_cmd, exit_args) = shell_cmd("exit 1");
       let bind_b = BindDef {
         inputs: Some(BindInputs::Bind(hash_a.clone())),
-        apply_actions: vec![BindAction::Cmd {
-          cmd: "exit 1".to_string(),
+        apply_actions: vec![Action::Cmd(CmdOpts {
+          cmd: exit_cmd.to_string(),
+          args: Some(exit_args),
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: None,
         destroy_actions: None,
       };
@@ -1081,11 +1105,12 @@ mod tests {
         name: "failing-build".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![BuildAction::Cmd {
+        apply_actions: vec![Action::Cmd(CmdOpts {
           cmd: "exit 1".to_string(),
+          args: None,
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: None,
       };
       let build_hash = build.compute_hash().unwrap();

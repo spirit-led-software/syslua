@@ -15,7 +15,7 @@ use crate::build::store::build_path;
 use crate::manifest::Manifest;
 use crate::placeholder;
 
-use crate::execute::actions::execute_action;
+use crate::action::execute_action;
 use crate::execute::resolver::{BuildResolver, ExecutionResolver};
 use crate::execute::types::{ActionResult, BindResult, BuildResult, ExecuteConfig, ExecuteError};
 use crate::util::hash::{ObjectHash, hash_directory};
@@ -189,7 +189,7 @@ pub async fn realize_build(
   for (idx, action) in build_def.apply_actions.iter().enumerate() {
     debug!(action_idx = idx, "executing action");
 
-    let result = execute_action(action, &resolver, &store_path, config.shell.as_deref()).await?;
+    let result = execute_action(action, &resolver, &store_path).await?;
 
     // Record the result for subsequent actions
     resolver.push_action_result(result.output.clone());
@@ -308,7 +308,7 @@ pub async fn realize_build_with_resolver(
   for (idx, action) in build_def.apply_actions.iter().enumerate() {
     debug!(action_idx = idx, "executing action");
 
-    let result = execute_action(action, &resolver, &store_path, config.shell.as_deref()).await?;
+    let result = execute_action(action, &resolver, &store_path).await?;
 
     // Record the result for subsequent actions
     resolver.push_action_result(result.output.clone());
@@ -413,7 +413,11 @@ fn resolve_outputs_with_resolver(
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::{build::BuildAction, util::hash::Hashable};
+  use crate::util::testutil::{ECHO_BIN, shell_cmd};
+  use crate::{
+    action::{Action, actions::cmd::CmdOpts},
+    util::hash::Hashable,
+  };
   use serial_test::serial;
   use tempfile::TempDir;
 
@@ -422,11 +426,12 @@ mod tests {
       name: "test-build".to_string(),
       version: Some("1.0.0".to_string()),
       inputs: None,
-      apply_actions: vec![BuildAction::Cmd {
-        cmd: "echo hello".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: ECHO_BIN.to_string(),
+        args: Some(vec!["hello".to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: None,
     }
   }
@@ -435,7 +440,6 @@ mod tests {
     ExecuteConfig {
       parallelism: 1,
       system: false,
-      shell: None,
     }
   }
 
@@ -498,11 +502,12 @@ mod tests {
         name: "test-build".to_string(),
         version: Some("1.0.0".to_string()),
         inputs: None,
-        apply_actions: vec![BuildAction::Cmd {
-          cmd: "echo /path/to/binary".to_string(),
+        apply_actions: vec![Action::Cmd(CmdOpts {
+          cmd: ECHO_BIN.to_string(),
+          args: Some(vec!["/path/to/binary".to_string()]),
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: Some(
           [
             ("bin".to_string(), "$${action:0}".to_string()),
@@ -541,22 +546,25 @@ mod tests {
         version: None,
         inputs: None,
         apply_actions: vec![
-          BuildAction::Cmd {
-            cmd: "echo step1".to_string(),
+          Action::Cmd(CmdOpts {
+            cmd: ECHO_BIN.to_string(),
+            args: Some(vec!["step1".to_string()]),
             env: None,
             cwd: None,
-          },
-          BuildAction::Cmd {
-            cmd: "echo step2".to_string(),
+          }),
+          Action::Cmd(CmdOpts {
+            cmd: ECHO_BIN.to_string(),
+            args: Some(vec!["step2".to_string()]),
             env: None,
             cwd: None,
-          },
-          BuildAction::Cmd {
+          }),
+          Action::Cmd(CmdOpts {
             // Reference previous action output
-            cmd: "echo $${action:0} $${action:1}".to_string(),
+            cmd: ECHO_BIN.to_string(),
+            args: Some(vec!["$${action:0}".to_string(), "$${action:1}".to_string()]),
             env: None,
             cwd: None,
-          },
+          }),
         ],
         outputs: Some(
           [("combined".to_string(), "$${action:2}".to_string())]
@@ -590,15 +598,17 @@ mod tests {
   #[serial]
   fn realize_build_action_failure() {
     with_temp_store(|| async {
+      let (cmd, args) = shell_cmd("exit 1");
       let build_def = BuildDef {
         name: "failing-build".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![BuildAction::Cmd {
-          cmd: "exit 1".to_string(),
+        apply_actions: vec![Action::Cmd(CmdOpts {
+          cmd: cmd.to_string(),
+          args: Some(args),
           env: None,
           cwd: None,
-        }],
+        })],
         outputs: None,
       };
       let hash = build_def.compute_hash().unwrap();

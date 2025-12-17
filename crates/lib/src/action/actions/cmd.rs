@@ -6,10 +6,117 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use mlua::prelude::*;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 use tracing::{debug, info};
 
 use crate::execute::types::ExecuteError;
+
+/// Options for executing a shell command in a build.
+///
+/// This is a builder-pattern struct for configuring [`Action::Cmd`] actions.
+/// It can be constructed from a string slice for simple commands.
+///
+/// # Example
+///
+/// ```ignore
+/// // Simple command
+/// ctx.cmd("make install");
+///
+/// // With environment and working directory
+/// ctx.cmd(
+///     BuildCmdOptions::new("make")
+///         .with_args(vec!["install".to_string()])
+///         .with_env(env)
+///         .with_cwd("/build")
+/// );
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CmdOpts {
+  /// The command string to execute.
+  pub cmd: String,
+  /// Optional arguments for the command.
+  pub args: Option<Vec<String>>,
+  /// Optional environment variables to set.
+  pub env: Option<BTreeMap<String, String>>,
+  /// Optional working directory.
+  pub cwd: Option<String>,
+}
+
+impl CmdOpts {
+  /// Create a new command with default options.
+  pub fn new(cmd: &str) -> Self {
+    Self {
+      cmd: cmd.to_string(),
+      args: None,
+      env: None,
+      cwd: None,
+    }
+  }
+
+  /// Set arguments for the command.
+  pub fn with_args(mut self, args: Vec<String>) -> Self {
+    self.args = Some(args);
+    self
+  }
+
+  /// Set environment variables for the command.
+  pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
+    self.env = Some(env);
+    self
+  }
+
+  /// Set the working directory for the command.
+  pub fn with_cwd(mut self, cwd: &str) -> Self {
+    self.cwd = Some(cwd.to_string());
+    self
+  }
+}
+
+impl From<&str> for CmdOpts {
+  fn from(cmd: &str) -> Self {
+    CmdOpts::new(cmd)
+  }
+}
+
+pub fn parse_cmd_opts(opts: LuaValue) -> LuaResult<CmdOpts> {
+  match opts {
+    LuaValue::String(s) => {
+      let cmd = s.to_str()?.to_string();
+      Ok(CmdOpts::new(&cmd))
+    }
+    LuaValue::Table(table) => {
+      let cmd: String = table.get("cmd")?;
+      let args: Option<Vec<String>> = table.get("args")?;
+      let cwd: Option<String> = table.get("cwd")?;
+      let env: Option<LuaTable> = table.get("env")?;
+
+      let mut opts = CmdOpts::new(&cmd);
+
+      let mut args_vec = Vec::new();
+      if let Some(a) = args {
+        args_vec = a;
+      }
+      opts = opts.with_args(args_vec);
+
+      if let Some(cwd) = cwd {
+        opts = opts.with_cwd(&cwd);
+      }
+
+      if let Some(env_table) = env {
+        let mut env_map = BTreeMap::new();
+        for pair in env_table.pairs::<String, String>() {
+          let (key, value) = pair?;
+          env_map.insert(key, value);
+        }
+        opts = opts.with_env(env_map);
+      }
+      Ok(opts)
+    }
+    _ => Err(LuaError::external("cmd() expects a string or table with 'cmd' field")),
+  }
+}
 
 /// Execute a Cmd action.
 ///
@@ -24,21 +131,18 @@ use crate::execute::types::ExecuteError;
 ///
 /// # Arguments
 ///
-/// * `cmd` - The command string to execute
-/// * `env` - Optional user-specified environment variables
-/// * `cwd` - Optional working directory (defaults to out_dir)
+/// * `opts` - The command options to execute
 /// * `out_dir` - The build's output directory
-/// * `shell` - The shell to use (defaults to /bin/sh on Unix, cmd.exe on Windows)
 ///
 /// # Returns
 ///
 /// The stdout of the command on success (trimmed).
 pub async fn execute_cmd(
   cmd: &str,
+  args: Option<&Vec<String>>,
   env: Option<&BTreeMap<String, String>>,
   cwd: Option<&str>,
   out_dir: &Path,
-  shell: Option<&str>,
 ) -> Result<String, ExecuteError> {
   info!(cmd = %cmd, "executing command");
 
@@ -46,16 +150,12 @@ pub async fn execute_cmd(
   let tmp_dir = out_dir.join("tmp");
   tokio::fs::create_dir_all(&tmp_dir).await?;
 
-  // Determine shell and arguments
-  let (shell_cmd, shell_args) = get_shell(shell);
-
   let working_dir = cwd.map(Path::new).unwrap_or(out_dir);
 
   // Build the command with isolated environment
-  let mut command = Command::new(&shell_cmd);
+  let mut command = Command::new(cmd);
   command
-    .args(&shell_args)
-    .arg(cmd)
+    .args(args.unwrap_or(&Vec::new()))
     .current_dir(working_dir)
     // Clear all environment variables
     .env_clear();
@@ -103,7 +203,7 @@ pub async fn execute_cmd(
     }
   }
 
-  debug!(shell = %shell_cmd, working_dir = ?working_dir, "spawning process");
+  debug!(cmd = %cmd,  working_dir = ?working_dir, "spawning process");
 
   let output = command.output().await?;
 
@@ -134,83 +234,20 @@ pub async fn execute_cmd(
   Ok(stdout)
 }
 
-/// Get the shell command and argument for the current platform.
-///
-/// # Arguments
-///
-/// * `override_shell` - Optional shell override from config
-///
-/// # Returns
-///
-/// A tuple of (shell_command, shell_argument) where:
-/// - shell_command is the path to the shell
-/// - shell_argument is the flag to pass the command (e.g., "-c" for sh)
-///
-/// # Note
-///
-/// For isolated builds, we always use `/bin/sh` (Unix) or `cmd.exe` (Windows)
-/// by default, rather than the user's configured shell. This is because
-/// interactive shells like bash/zsh may source profile files that modify
-/// the environment (e.g., adding to PATH), which would break isolation.
-/// Use the `override_shell` parameter only when you explicitly want a
-/// different shell.
-fn get_shell(override_shell: Option<&str>) -> (String, Vec<String>) {
-  if let Some(shell) = override_shell {
-    // User explicitly specified a shell - detect appropriate argument
-    let args = if shell.contains("powershell") || shell.contains("pwsh") {
-      vec![
-        "-NoProfile".to_string(),
-        "-NonInteractive".to_string(),
-        "-ExecutionPolicy".to_string(),
-        "Bypass".to_string(),
-        "-Command".to_string(),
-      ]
-    } else if shell.contains("cmd") {
-      vec!["/C".to_string()]
-    } else {
-      // Assume Unix-style shell (bash, sh, zsh, etc.)
-      vec!["-c".to_string()]
-    };
-    return (shell.to_string(), args);
-  }
-
-  // Use the default system shell for isolation
-  // Don't use $SHELL as it may source user profiles
-  #[cfg(unix)]
-  {
-    ("/bin/sh".to_string(), vec!["-c".to_string()])
-  }
-
-  #[cfg(windows)]
-  {
-    ("cmd.exe".to_string(), vec!["/C".to_string()])
-  }
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
+  use crate::util::testutil::{ECHO_BIN, shell_cmd, shell_echo_env, touch_file};
   use tempfile::TempDir;
-
-  /// Get an echo command that prints an environment variable.
-  /// Unix: echo $VAR
-  /// Windows: echo %VAR%
-  #[cfg(unix)]
-  fn echo_env(var: &str) -> String {
-    format!("echo ${}", var)
-  }
-
-  #[cfg(windows)]
-  fn echo_env(var: &str) -> String {
-    format!("echo %{}%", var)
-  }
 
   #[tokio::test]
   async fn execute_simple_command() {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    let result = execute_cmd("echo hello", None, None, out_dir, None).await.unwrap();
+    let result = execute_cmd(ECHO_BIN, Some(&vec!["hello".to_string()]), None, None, out_dir)
+      .await
+      .unwrap();
 
     assert_eq!(result, "hello");
   }
@@ -223,9 +260,8 @@ mod tests {
     let mut env = BTreeMap::new();
     env.insert("MY_VAR".to_string(), "my_value".to_string());
 
-    let result = execute_cmd(&echo_env("MY_VAR"), Some(&env), None, out_dir, None)
-      .await
-      .unwrap();
+    let (cmd, args) = shell_echo_env("MY_VAR");
+    let result = execute_cmd(cmd, Some(&args), Some(&env), None, out_dir).await.unwrap();
 
     assert_eq!(result, "my_value");
   }
@@ -235,7 +271,8 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    let result = execute_cmd(&echo_env("out"), None, None, out_dir, None).await.unwrap();
+    let (cmd, args) = shell_echo_env("out");
+    let result = execute_cmd(cmd, Some(&args), None, None, out_dir).await.unwrap();
 
     assert_eq!(result, out_dir.to_string_lossy());
   }
@@ -245,7 +282,8 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    let result = execute_cmd(&echo_env("PATH"), None, None, out_dir, None).await.unwrap();
+    let (cmd, args) = shell_echo_env("PATH");
+    let result = execute_cmd(cmd, Some(&args), None, None, out_dir).await.unwrap();
 
     #[cfg(unix)]
     assert_eq!(result, "/path-not-set");
@@ -264,9 +302,8 @@ mod tests {
     let out_dir = temp_dir.path();
 
     // SystemRoot should be preserved for Windows to function properly
-    let result = execute_cmd("echo %SystemRoot%", None, None, out_dir, None)
-      .await
-      .unwrap();
+    let (cmd, args) = shell_echo_env("SystemRoot");
+    let result = execute_cmd(cmd, Some(&args), None, None, out_dir).await.unwrap();
 
     // SystemRoot is typically C:\Windows or similar
     assert!(!result.is_empty(), "SystemRoot should be preserved");
@@ -282,9 +319,8 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    let result = execute_cmd(&echo_env("SOURCE_DATE_EPOCH"), None, None, out_dir, None)
-      .await
-      .unwrap();
+    let (cmd, args) = shell_echo_env("SOURCE_DATE_EPOCH");
+    let result = execute_cmd(cmd, Some(&args), None, None, out_dir).await.unwrap();
 
     assert_eq!(result, "315532800");
   }
@@ -294,21 +330,10 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    let result = execute_cmd("exit 1", None, None, out_dir, None).await;
+    let (cmd, args) = shell_cmd("exit 1");
+    let result = execute_cmd(cmd, Some(&args), None, None, out_dir).await;
 
     assert!(matches!(result, Err(ExecuteError::CmdFailed { code: Some(1), .. })));
-  }
-
-  /// Returns a command that creates a file named "cwd_marker" in the current directory.
-  /// This is more reliable than comparing path strings across platforms.
-  #[cfg(unix)]
-  fn create_cwd_marker() -> &'static str {
-    "/usr/bin/touch cwd_marker"
-  }
-
-  #[cfg(windows)]
-  fn create_cwd_marker() -> &'static str {
-    "type nul > cwd_marker"
   }
 
   #[tokio::test]
@@ -321,15 +346,10 @@ mod tests {
     tokio::fs::create_dir(&sub_dir).await.unwrap();
 
     // Run a command that creates a marker file in the cwd
-    execute_cmd(
-      create_cwd_marker(),
-      None,
-      Some(sub_dir.to_str().unwrap()),
-      out_dir,
-      None,
-    )
-    .await
-    .unwrap();
+    let (cmd, args) = touch_file("cwd_marker");
+    execute_cmd(cmd, Some(&args), None, Some(sub_dir.to_str().unwrap()), out_dir)
+      .await
+      .unwrap();
 
     // Verify the marker file was created in the subdirectory (proving cwd was set correctly)
     assert!(
@@ -343,9 +363,8 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    execute_cmd(&echo_env("TMPDIR"), None, None, out_dir, None)
-      .await
-      .unwrap();
+    let (cmd, args) = shell_echo_env("TMPDIR");
+    execute_cmd(cmd, Some(&args), None, None, out_dir).await.unwrap();
 
     // Verify tmp directory was created
     assert!(out_dir.join("tmp").exists());
@@ -357,13 +376,14 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
 
-    let cmd = r#"
+    let script = r#"
       x=1
       y=2
       echo $((x + y))
     "#;
 
-    let result = execute_cmd(cmd, None, None, out_dir, None).await.unwrap();
+    let (cmd, args) = shell_cmd(script);
+    let result = execute_cmd(cmd, Some(&args), None, None, out_dir).await.unwrap();
 
     assert_eq!(result, "3");
   }
@@ -376,9 +396,10 @@ mod tests {
 
     // Test command chaining with cmd.exe using && operator
     // (cmd.exe doesn't execute multiple lines like Unix shells)
-    let cmd = "echo first && echo 3";
+    let script = "echo first && echo 3";
 
-    let result = execute_cmd(cmd, None, None, out_dir, None).await.unwrap();
+    let (cmd, args) = shell_cmd(script);
+    let result = execute_cmd(cmd, Some(&args), None, None, out_dir).await.unwrap();
 
     // cmd.exe should execute both commands, output ends with "3"
     assert!(
@@ -386,67 +407,5 @@ mod tests {
       "Expected output to end with '3', got: {}",
       result
     );
-  }
-
-  #[test]
-  fn get_shell_with_override() {
-    let (shell, arg) = get_shell(Some("/usr/bin/bash"));
-    assert_eq!(shell, "/usr/bin/bash");
-    assert_eq!(arg, vec!["-c"]);
-  }
-
-  #[test]
-  fn get_shell_with_powershell_override() {
-    let (shell, args) = get_shell(Some("powershell.exe"));
-    assert_eq!(shell, "powershell.exe");
-    assert_eq!(
-      args,
-      vec![
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command"
-      ]
-    );
-  }
-
-  #[test]
-  fn get_shell_with_pwsh_override() {
-    let (shell, args) = get_shell(Some("pwsh"));
-    assert_eq!(shell, "pwsh");
-    assert_eq!(
-      args,
-      vec![
-        "-NoProfile",
-        "-NonInteractive",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command"
-      ]
-    );
-  }
-
-  #[test]
-  fn get_shell_with_cmd_override() {
-    let (shell, args) = get_shell(Some("cmd.exe"));
-    assert_eq!(shell, "cmd.exe");
-    assert_eq!(args, vec!["/C"]);
-  }
-
-  #[test]
-  fn get_shell_default() {
-    // Default shell should be /bin/sh on Unix, cmd.exe on Windows
-    let (shell, args) = get_shell(None);
-    #[cfg(unix)]
-    {
-      assert_eq!(shell, "/bin/sh");
-      assert_eq!(args, vec!["-c"]);
-    }
-    #[cfg(windows)]
-    {
-      assert_eq!(shell, "cmd.exe");
-      assert_eq!(args, vec!["/C"]);
-    }
   }
 }

@@ -9,6 +9,7 @@
 //! The types are designed to be Lua-runtime agnostic. The `syslua-lua` crate
 //! handles conversion between Lua values and these types.
 
+pub mod action;
 pub mod bind;
 pub mod build;
 pub mod consts;

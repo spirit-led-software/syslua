@@ -466,8 +466,10 @@ mod tests {
   use std::collections::BTreeMap;
 
   use super::*;
+  use crate::action::Action;
+  use crate::action::actions::cmd::CmdOpts;
   use crate::bind::BindDef;
-  use crate::build::{BuildAction, BuildDef};
+  use crate::build::BuildDef;
   use crate::util::hash::Hashable;
 
   fn make_build(name: &str, inputs: Option<BuildInputs>) -> BuildDef {
@@ -475,24 +477,25 @@ mod tests {
       name: name.to_string(),
       version: None,
       inputs,
-      apply_actions: vec![BuildAction::Cmd {
-        cmd: "echo test".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: "echo".to_string(),
+        args: Some(vec![name.to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: None,
     }
   }
 
   fn make_bind(inputs: Option<BindInputs>) -> BindDef {
-    use crate::bind::BindAction;
     BindDef {
       inputs,
-      apply_actions: vec![BindAction::Cmd {
-        cmd: "echo test".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: "echo".to_string(),
+        args: Some(vec!["test".to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: None,
       destroy_actions: None,
     }

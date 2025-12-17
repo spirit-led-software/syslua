@@ -196,10 +196,6 @@ pub struct ExecuteConfig {
 
   /// Whether to use system store paths (vs user store).
   pub system: bool,
-
-  /// Shell to use for command execution.
-  /// If None, uses SHELL env var or falls back to /bin/sh (Unix) or cmd.exe (Windows).
-  pub shell: Option<String>,
 }
 
 impl Default for ExecuteConfig {
@@ -207,7 +203,6 @@ impl Default for ExecuteConfig {
     Self {
       parallelism: num_cpus(),
       system: false,
-      shell: None,
     }
   }
 }
@@ -347,6 +342,5 @@ mod tests {
     let config = ExecuteConfig::default();
     assert!(config.parallelism >= 1);
     assert!(!config.system);
-    assert!(config.shell.is_none());
   }
 }

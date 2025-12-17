@@ -3,15 +3,15 @@
 //! This module handles executing actions for a single bind and
 //! producing the final BindResult.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 
 use tempfile::TempDir;
 use tracing::{debug, info};
 
-use crate::bind::{BindAction, BindDef};
-use crate::execute::actions::execute_cmd;
-use crate::execute::types::{ActionResult, BindResult, ExecuteConfig, ExecuteError};
+use crate::action::{Action, execute_action};
+use crate::bind::BindDef;
+use crate::execute::types::{ActionResult, BindResult, ExecuteError};
 use crate::placeholder::{self, Resolver};
 use crate::util::hash::ObjectHash;
 
@@ -34,7 +34,6 @@ pub async fn apply_bind<R: Resolver>(
   hash: &ObjectHash,
   bind_def: &BindDef,
   resolver: &R,
-  config: &ExecuteConfig,
 ) -> Result<BindResult, ExecuteError> {
   info!(hash = %hash.0, "applying bind");
 
@@ -51,7 +50,7 @@ pub async fn apply_bind<R: Resolver>(
 
   // Execute actions in order
   let (action_results, outputs) =
-    execute_bind_actions(&bind_def.apply_actions, bind_resolver, bind_def, out_dir, config).await?;
+    execute_bind_actions(&bind_def.apply_actions, bind_resolver, bind_def, out_dir).await?;
 
   info!(hash = %hash.0, "bind applied");
 
@@ -85,7 +84,6 @@ pub async fn destroy_bind<R: Resolver>(
   bind_def: &BindDef,
   bind_result: &BindResult,
   resolver: &R,
-  config: &ExecuteConfig,
 ) -> Result<(), ExecuteError> {
   let Some(destroy_actions) = &bind_def.destroy_actions else {
     debug!(hash = %hash.0, "bind has no destroy_actions, skipping");
@@ -108,7 +106,7 @@ pub async fn destroy_bind<R: Resolver>(
   };
 
   // Execute destroy actions
-  let _ = execute_bind_actions_raw(destroy_actions, bind_resolver, out_dir, config).await?;
+  let _ = execute_bind_actions_raw(destroy_actions, bind_resolver, out_dir).await?;
 
   info!(hash = %hash.0, "bind destroyed");
 
@@ -117,18 +115,17 @@ pub async fn destroy_bind<R: Resolver>(
 
 /// Execute bind actions and resolve outputs.
 async fn execute_bind_actions<R: Resolver>(
-  actions: &[BindAction],
+  actions: &[Action],
   mut resolver: BindApplyResolver<'_, R>,
   bind_def: &BindDef,
   out_dir: &Path,
-  config: &ExecuteConfig,
 ) -> Result<(Vec<ActionResult>, HashMap<String, String>), ExecuteError> {
   let mut action_results = Vec::new();
 
   for (idx, action) in actions.iter().enumerate() {
     debug!(action_idx = idx, "executing bind action");
 
-    let result = execute_bind_action(action, &resolver, out_dir, config.shell.as_deref()).await?;
+    let result = execute_action(action, &resolver, out_dir).await?;
 
     // Record the result for subsequent actions
     resolver.action_results.push(result.output.clone());
@@ -143,65 +140,22 @@ async fn execute_bind_actions<R: Resolver>(
 
 /// Execute bind actions without output resolution (used for destroy).
 async fn execute_bind_actions_raw<R: Resolver>(
-  actions: &[BindAction],
+  actions: &[Action],
   mut resolver: BindDestroyResolver<'_, R>,
   out_dir: &Path,
-  config: &ExecuteConfig,
 ) -> Result<Vec<ActionResult>, ExecuteError> {
   let mut action_results = Vec::new();
 
   for (idx, action) in actions.iter().enumerate() {
     debug!(action_idx = idx, "executing destroy action");
 
-    let result = execute_bind_action(action, &resolver, out_dir, config.shell.as_deref()).await?;
+    let result = execute_action(action, &resolver, out_dir).await?;
 
     resolver.action_results.push(result.output.clone());
     action_results.push(result);
   }
 
   Ok(action_results)
-}
-
-/// Execute a single bind action.
-async fn execute_bind_action(
-  action: &BindAction,
-  resolver: &impl Resolver,
-  out_dir: &Path,
-  shell: Option<&str>,
-) -> Result<ActionResult, ExecuteError> {
-  match action {
-    BindAction::Cmd { cmd, env, cwd } => {
-      // Resolve placeholders in command, env, and cwd
-      let resolved_cmd = placeholder::substitute(cmd, resolver)?;
-
-      let resolved_env = if let Some(env) = env {
-        let mut resolved = BTreeMap::new();
-        for (key, value) in env {
-          resolved.insert(key.clone(), placeholder::substitute(value, resolver)?);
-        }
-        Some(resolved)
-      } else {
-        None
-      };
-
-      let resolved_cwd = if let Some(cwd) = cwd {
-        Some(placeholder::substitute(cwd, resolver)?)
-      } else {
-        None
-      };
-
-      let output = execute_cmd(
-        &resolved_cmd,
-        resolved_env.as_ref(),
-        resolved_cwd.as_deref(),
-        out_dir,
-        shell,
-      )
-      .await?;
-
-      Ok(ActionResult { output })
-    }
-  }
 }
 
 /// Resolve the outputs from a bind definition.
@@ -290,7 +244,8 @@ impl<R: Resolver> Resolver for BindDestroyResolver<'_, R> {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::{placeholder::PlaceholderError, util::hash::Hashable};
+  use crate::util::testutil::{ECHO_BIN, shell_cmd};
+  use crate::{action::actions::cmd::CmdOpts, placeholder::PlaceholderError, util::hash::Hashable};
   use serial_test::serial;
 
   /// Simple test resolver that returns fixed values.
@@ -359,21 +314,14 @@ mod tests {
   fn make_simple_bind() -> BindDef {
     BindDef {
       inputs: None,
-      apply_actions: vec![BindAction::Cmd {
-        cmd: "echo applied".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: ECHO_BIN.to_string(),
+        args: Some(vec!["applied".to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: None,
       destroy_actions: None,
-    }
-  }
-
-  fn test_config() -> ExecuteConfig {
-    ExecuteConfig {
-      parallelism: 1,
-      system: false,
-      shell: None,
     }
   }
 
@@ -383,9 +331,8 @@ mod tests {
     let bind_def = make_simple_bind();
     let hash = bind_def.compute_hash().unwrap();
     let resolver = TestResolver::new();
-    let config = test_config();
 
-    let result = apply_bind(&hash, &bind_def, &resolver, &config).await.unwrap();
+    let result = apply_bind(&hash, &bind_def, &resolver).await.unwrap();
 
     assert_eq!(result.action_results.len(), 1);
     assert_eq!(result.action_results[0].output, "applied");
@@ -396,19 +343,19 @@ mod tests {
   async fn apply_bind_with_outputs() {
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![BindAction::Cmd {
-        cmd: "echo /path/to/link".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: ECHO_BIN.to_string(),
+        args: Some(vec!["/path/to/link".to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: Some([("link".to_string(), "$${action:0}".to_string())].into_iter().collect()),
       destroy_actions: None,
     };
     let hash = bind_def.compute_hash().unwrap();
     let resolver = TestResolver::new();
-    let config = test_config();
 
-    let result = apply_bind(&hash, &bind_def, &resolver, &config).await.unwrap();
+    let result = apply_bind(&hash, &bind_def, &resolver).await.unwrap();
 
     assert_eq!(result.outputs["link"], "/path/to/link");
   }
@@ -418,19 +365,19 @@ mod tests {
   async fn apply_bind_with_out_placeholder() {
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![BindAction::Cmd {
-        cmd: "echo $${out}".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: ECHO_BIN.to_string(),
+        args: Some(vec!["$${out}".to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: Some([("dir".to_string(), "$${out}".to_string())].into_iter().collect()),
       destroy_actions: None,
     };
     let hash = bind_def.compute_hash().unwrap();
     let resolver = TestResolver::new();
-    let config = test_config();
 
-    let result = apply_bind(&hash, &bind_def, &resolver, &config).await.unwrap();
+    let result = apply_bind(&hash, &bind_def, &resolver).await.unwrap();
 
     // The output should be a temp directory path
     assert!(!result.outputs["dir"].is_empty());
@@ -448,11 +395,12 @@ mod tests {
   async fn apply_bind_with_build_dependency() {
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![BindAction::Cmd {
-        cmd: "echo $${build:abc123:bin}".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: ECHO_BIN.to_string(),
+        args: Some(vec!["$${build:abc123:bin}".to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: None,
       destroy_actions: None,
     };
@@ -461,9 +409,8 @@ mod tests {
     let mut build_outputs = HashMap::new();
     build_outputs.insert("bin".to_string(), "/store/obj/myapp/bin".to_string());
     let resolver = TestResolver::new().with_build("abc123def456", build_outputs);
-    let config = test_config();
 
-    let result = apply_bind(&hash, &bind_def, &resolver, &config).await.unwrap();
+    let result = apply_bind(&hash, &bind_def, &resolver).await.unwrap();
 
     assert_eq!(result.action_results[0].output, "/store/obj/myapp/bin");
   }
@@ -473,31 +420,32 @@ mod tests {
   async fn destroy_bind_with_actions() {
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![BindAction::Cmd {
-        cmd: "echo applied".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: ECHO_BIN.to_string(),
+        args: Some(vec!["applied".to_string()]),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: Some(
         [("path".to_string(), "/created/path".to_string())]
           .into_iter()
           .collect(),
       ),
-      destroy_actions: Some(vec![BindAction::Cmd {
-        cmd: "echo destroyed".to_string(),
+      destroy_actions: Some(vec![Action::Cmd(CmdOpts {
+        cmd: ECHO_BIN.to_string(),
+        args: Some(vec!["destroyed".to_string()]),
         env: None,
         cwd: None,
-      }]),
+      })]),
     };
     let hash = bind_def.compute_hash().unwrap();
     let resolver = TestResolver::new();
-    let config = test_config();
 
     // First apply
-    let bind_result = apply_bind(&hash, &bind_def, &resolver, &config).await.unwrap();
+    let bind_result = apply_bind(&hash, &bind_def, &resolver).await.unwrap();
 
     // Then destroy
-    let destroy_result = destroy_bind(&hash, &bind_def, &bind_result, &resolver, &config).await;
+    let destroy_result = destroy_bind(&hash, &bind_def, &bind_result, &resolver).await;
 
     assert!(destroy_result.is_ok());
   }
@@ -508,7 +456,6 @@ mod tests {
     let bind_def = make_simple_bind();
     let hash = bind_def.compute_hash().unwrap();
     let resolver = TestResolver::new();
-    let config = test_config();
 
     let bind_result = BindResult {
       outputs: HashMap::new(),
@@ -516,43 +463,31 @@ mod tests {
     };
 
     // Destroy should succeed even with no destroy_actions
-    let result = destroy_bind(&hash, &bind_def, &bind_result, &resolver, &config).await;
+    let result = destroy_bind(&hash, &bind_def, &bind_result, &resolver).await;
     assert!(result.is_ok());
   }
 
   #[tokio::test]
   #[serial]
   async fn apply_bind_action_failure() {
+    let (cmd, args) = shell_cmd("exit 1");
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![BindAction::Cmd {
-        cmd: "exit 1".to_string(),
+      apply_actions: vec![Action::Cmd(CmdOpts {
+        cmd: cmd.to_string(),
+        args: Some(args),
         env: None,
         cwd: None,
-      }],
+      })],
       outputs: None,
       destroy_actions: None,
     };
     let hash = bind_def.compute_hash().unwrap();
     let resolver = TestResolver::new();
-    let config = test_config();
 
-    let result = apply_bind(&hash, &bind_def, &resolver, &config).await;
+    let result = apply_bind(&hash, &bind_def, &resolver).await;
 
     assert!(matches!(result, Err(ExecuteError::CmdFailed { .. })));
-  }
-
-  /// Helper to create an echo command that combines two placeholders.
-  /// On Unix, we can use quotes. On Windows cmd.exe, quotes are echoed literally.
-  #[cfg(unix)]
-  fn echo_combined_placeholders() -> String {
-    "echo \"$${action:0} $${action:1}\"".to_string()
-  }
-
-  #[cfg(windows)]
-  fn echo_combined_placeholders() -> String {
-    // cmd.exe echoes quotes literally, so omit them
-    "echo $${action:0} $${action:1}".to_string()
   }
 
   #[tokio::test]
@@ -561,21 +496,24 @@ mod tests {
     let bind_def = BindDef {
       inputs: None,
       apply_actions: vec![
-        BindAction::Cmd {
-          cmd: "echo step1".to_string(),
+        Action::Cmd(CmdOpts {
+          cmd: ECHO_BIN.to_string(),
+          args: Some(vec!["step1".to_string()]),
           env: None,
           cwd: None,
-        },
-        BindAction::Cmd {
-          cmd: "echo step2".to_string(),
+        }),
+        Action::Cmd(CmdOpts {
+          cmd: ECHO_BIN.to_string(),
+          args: Some(vec!["step2".to_string()]),
           env: None,
           cwd: None,
-        },
-        BindAction::Cmd {
-          cmd: echo_combined_placeholders(),
+        }),
+        Action::Cmd(CmdOpts {
+          cmd: ECHO_BIN.to_string(),
+          args: Some(vec!["$${action:0}".to_string(), "$${action:1}".to_string()]),
           env: None,
           cwd: None,
-        },
+        }),
       ],
       outputs: Some(
         [("combined".to_string(), "$${action:2}".to_string())]
@@ -586,9 +524,8 @@ mod tests {
     };
     let hash = bind_def.compute_hash().unwrap();
     let resolver = TestResolver::new();
-    let config = test_config();
 
-    let result = apply_bind(&hash, &bind_def, &resolver, &config).await.unwrap();
+    let result = apply_bind(&hash, &bind_def, &resolver).await.unwrap();
 
     assert_eq!(result.action_results.len(), 3);
     assert_eq!(result.action_results[0].output, "step1");

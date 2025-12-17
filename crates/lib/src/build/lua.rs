@@ -11,60 +11,14 @@ use std::rc::Rc;
 
 use mlua::prelude::*;
 
+use crate::action::ActionCtx;
 use crate::build::BuildInputs;
 use crate::manifest::Manifest;
 use crate::outputs::lua::parse_outputs;
 use crate::util::hash::Hashable;
 use crate::{bind::BIND_REF_TYPE, util::hash::ObjectHash};
 
-use super::{BUILD_REF_TYPE, BuildCmdOpts, BuildCtx, BuildDef};
-
-impl LuaUserData for BuildCtx {
-  fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-    fields.add_field_method_get("out", |_, this| Ok(this.out().to_string()));
-  }
-
-  fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-    methods.add_method_mut("fetch_url", |_, this, (url, sha256): (String, String)| {
-      Ok(this.fetch_url(&url, &sha256))
-    });
-
-    methods.add_method_mut("cmd", |_, this, opts: LuaValue| {
-      let cmd_opts = parse_cmd_opts(opts)?;
-      Ok(this.cmd(cmd_opts))
-    });
-  }
-}
-
-fn parse_cmd_opts(opts: LuaValue) -> LuaResult<BuildCmdOpts> {
-  match opts {
-    LuaValue::String(s) => {
-      let cmd = s.to_str()?.to_string();
-      Ok(BuildCmdOpts::new(&cmd))
-    }
-    LuaValue::Table(table) => {
-      let cmd: String = table.get("cmd")?;
-      let cwd: Option<String> = table.get("cwd")?;
-      let env: Option<LuaTable> = table.get("env")?;
-
-      let mut opts = BuildCmdOpts::new(&cmd);
-      if let Some(cwd) = cwd {
-        opts = opts.with_cwd(&cwd);
-      }
-
-      if let Some(env_table) = env {
-        let mut env_map = BTreeMap::new();
-        for pair in env_table.pairs::<String, String>() {
-          let (key, value) = pair?;
-          env_map.insert(key, value);
-        }
-        opts = opts.with_env(env_map);
-      }
-      Ok(opts)
-    }
-    _ => Err(LuaError::external("cmd() expects a string or table with 'cmd' field")),
-  }
-}
+use super::{BUILD_REF_TYPE, BuildDef};
 
 /// Convert a Lua value to BuildInputsRef (for resolved/static inputs).
 ///
@@ -242,7 +196,7 @@ pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<
     };
 
     // 3. Create BuildCtx and call the apply function
-    let ctx = BuildCtx::new();
+    let ctx = ActionCtx::new();
     let ctx_userdata = lua.create_userdata(ctx)?;
 
     // Prepare inputs argument for apply function
@@ -273,8 +227,8 @@ pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<
       }
     };
 
-    // 5. Extract actions from BuildCtx
-    let ctx: BuildCtx = ctx_userdata.take()?;
+    // 5. Extract actions from ActionCtx
+    let ctx: ActionCtx = ctx_userdata.take()?;
     let apply_actions = ctx.into_actions();
 
     // 6. Create BuildDef
@@ -355,7 +309,7 @@ mod tests {
   }
 
   mod sys_build {
-    use crate::consts::OBJ_HASH_PREFIX_LEN;
+    use crate::{action::Action, consts::OBJ_HASH_PREFIX_LEN};
 
     use super::*;
 
@@ -833,27 +787,26 @@ mod tests {
       // Check that the commands contain the $${out} placeholder
       assert_eq!(build_def.apply_actions.len(), 2);
 
-      use crate::build::BuildAction;
       match &build_def.apply_actions[0] {
-        BuildAction::Cmd { cmd, .. } => {
+        Action::Cmd(opts) => {
           assert!(
-            cmd.contains("$${out}"),
+            opts.cmd.contains("$${out}"),
             "cmd should contain ${{out}} placeholder: {}",
-            cmd
+            opts.cmd
           );
-          assert_eq!(cmd, "mkdir -p $${out}/bin");
+          assert_eq!(opts.cmd, "mkdir -p $${out}/bin");
         }
         _ => panic!("expected Cmd action"),
       }
 
       match &build_def.apply_actions[1] {
-        BuildAction::Cmd { cmd, .. } => {
+        Action::Cmd(opts) => {
           assert!(
-            cmd.contains("$${out}"),
+            opts.cmd.contains("$${out}"),
             "cmd should contain ${{out}} placeholder: {}",
-            cmd
+            opts.cmd
           );
-          assert_eq!(cmd, "cp binary $${out}/bin/");
+          assert_eq!(opts.cmd, "cp binary $${out}/bin/");
         }
         _ => panic!("expected Cmd action"),
       }

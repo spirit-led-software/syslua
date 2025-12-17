@@ -1,7 +1,7 @@
 //! Lua bindings for `sys.bind{}`.
 //!
 //! This module provides:
-//! - `BindCtx` as LuaUserData with methods like `cmd`
+//! - `ActionCtx` as LuaUserData with methods like `cmd`
 //! - `register_sys_bind()` to register the `sys.bind` function
 
 use std::cell::RefCell;
@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use mlua::prelude::*;
 
+use crate::action::ActionCtx;
 use crate::bind::BindInputs;
 use crate::build::BUILD_REF_TYPE;
 use crate::build::lua::build_hash_to_lua;
@@ -17,50 +18,7 @@ use crate::manifest::Manifest;
 use crate::outputs::lua::{outputs_to_lua_table, parse_outputs};
 use crate::util::hash::{Hashable, ObjectHash};
 
-use super::{BIND_REF_TYPE, BindCmdOpts, BindCtx, BindDef};
-
-impl LuaUserData for BindCtx {
-  fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
-    fields.add_field_method_get("out", |_, this| Ok(this.out().to_string()));
-  }
-
-  fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
-    methods.add_method_mut("cmd", |_, this, opts: LuaValue| {
-      let cmd_opts = parse_cmd_opts(opts)?;
-      Ok(this.cmd(cmd_opts))
-    });
-  }
-}
-
-fn parse_cmd_opts(opts: LuaValue) -> LuaResult<BindCmdOpts> {
-  match opts {
-    LuaValue::String(s) => {
-      let cmd = s.to_str()?.to_string();
-      Ok(BindCmdOpts::new(&cmd))
-    }
-    LuaValue::Table(table) => {
-      let cmd: String = table.get("cmd")?;
-      let cwd: Option<String> = table.get("cwd")?;
-      let env: Option<LuaTable> = table.get("env")?;
-
-      let mut opts = BindCmdOpts::new(&cmd);
-      if let Some(cwd) = cwd {
-        opts = opts.with_cwd(&cwd);
-      }
-
-      if let Some(env_table) = env {
-        let mut env_map = BTreeMap::new();
-        for pair in env_table.pairs::<String, String>() {
-          let (key, value) = pair?;
-          env_map.insert(key, value);
-        }
-        opts = opts.with_env(env_map);
-      }
-      Ok(opts)
-    }
-    _ => Err(LuaError::external("cmd() expects a string or table with 'cmd' field")),
-  }
-}
+use super::{BIND_REF_TYPE, BindDef};
 
 /// Convert a Lua value to BindInputsRef (for resolved/static inputs).
 ///
@@ -215,8 +173,8 @@ pub fn bind_hash_to_lua(lua: &Lua, hash: &ObjectHash, manifest: &Manifest) -> Lu
 /// The `sys.bind{}` function:
 /// 1. Parses a BindSpec from the Lua table (inputs, apply, destroy)
 /// 2. Resolves inputs (calls function if dynamic, uses table directly if static)
-/// 3. Creates a BindCtx and calls the apply function
-/// 4. Optionally calls the destroy function with a fresh BindCtx
+/// 3. Creates a ActionCtx and calls the apply function
+/// 4. Optionally calls the destroy function with a fresh ActionCtx
 /// 5. Creates a BindDef, computes its hash, and adds it to the manifest
 /// 6. Returns a BindRef as a Lua table with metatable marker
 pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<Manifest>>) -> LuaResult<()> {
@@ -245,8 +203,8 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       None => None,
     };
 
-    // 3. Create BindCtx and call the apply function
-    let apply_ctx = BindCtx::new();
+    // 3. Create ActionCtx and call the apply function
+    let apply_ctx = ActionCtx::new();
     let apply_ctx_userdata = lua.create_userdata(apply_ctx)?;
 
     // Prepare inputs argument for apply function
@@ -270,13 +228,13 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       }
     };
 
-    // 5. Extract apply actions from BindCtx
-    let apply_ctx: BindCtx = apply_ctx_userdata.take()?;
+    // 5. Extract apply actions from ActionCtx
+    let apply_ctx: ActionCtx = apply_ctx_userdata.take()?;
     let apply_actions = apply_ctx.into_actions();
 
     // 6. Optionally call destroy function
     let destroy_actions = if let Some(destroy_fn) = destroy_fn {
-      let destroy_ctx = BindCtx::new();
+      let destroy_ctx = ActionCtx::new();
       let destroy_ctx_userdata = lua.create_userdata(destroy_ctx)?;
 
       // Create outputs argument for destroy function
@@ -292,7 +250,7 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       // Call: destroy(outputs, ctx) -> ignored
       let _: LuaValue = destroy_fn.call((destroy_outputs_arg, &destroy_ctx_userdata))?;
 
-      let destroy_ctx: BindCtx = destroy_ctx_userdata.take()?;
+      let destroy_ctx: ActionCtx = destroy_ctx_userdata.take()?;
       let actions = destroy_ctx.into_actions();
       if actions.is_empty() { None } else { Some(actions) }
     } else {
@@ -373,7 +331,7 @@ mod tests {
   }
 
   mod sys_bind {
-    use crate::consts::OBJ_HASH_PREFIX_LEN;
+    use crate::{action::Action, consts::OBJ_HASH_PREFIX_LEN};
 
     use super::*;
 
@@ -833,26 +791,31 @@ mod tests {
       // Check that the commands contain the $${out} placeholder
       assert_eq!(bind_def.apply_actions.len(), 2);
 
-      use crate::bind::BindAction;
       match &bind_def.apply_actions[0] {
-        BindAction::Cmd { cmd, .. } => {
+        Action::Cmd(opts) => {
           assert!(
-            cmd.contains("$${out}"),
+            opts.cmd.contains("$${out}"),
             "cmd should contain ${{out}} placeholder: {}",
-            cmd
+            opts.cmd
           );
-          assert_eq!(cmd, "mkdir -p $${out}");
+          assert_eq!(opts.cmd, "mkdir -p $${out}");
+        }
+        _ => {
+          panic!("expected Cmd action");
         }
       }
 
       match &bind_def.apply_actions[1] {
-        BindAction::Cmd { cmd, .. } => {
+        Action::Cmd(opts) => {
           assert!(
-            cmd.contains("$${out}"),
+            opts.cmd.contains("$${out}"),
             "cmd should contain ${{out}} placeholder: {}",
-            cmd
+            opts.cmd
           );
-          assert_eq!(cmd, "ln -sf /src $${out}/link");
+          assert_eq!(opts.cmd, "ln -sf /src $${out}/link");
+        }
+        _ => {
+          panic!("expected Cmd action");
         }
       }
 
@@ -885,15 +848,17 @@ mod tests {
       let destroy_actions = bind_def.destroy_actions.as_ref().expect("should have destroy actions");
       assert_eq!(destroy_actions.len(), 1);
 
-      use crate::bind::BindAction;
       match &destroy_actions[0] {
-        BindAction::Cmd { cmd, .. } => {
+        Action::Cmd(opts) => {
           assert!(
-            cmd.contains("$${out}"),
+            opts.cmd.contains("$${out}"),
             "destroy cmd should contain ${{out}} placeholder: {}",
-            cmd
+            opts.cmd
           );
-          assert_eq!(cmd, "rm -rf $${out}");
+          assert_eq!(opts.cmd, "rm -rf $${out}");
+        }
+        _ => {
+          panic!("expected Cmd action");
         }
       }
 

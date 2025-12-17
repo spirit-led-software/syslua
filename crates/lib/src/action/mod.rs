@@ -1,19 +1,18 @@
-//! Action execution module.
-//!
-//! This module provides the dispatch logic for executing build actions.
+pub mod actions;
+pub mod lua;
+mod types;
 
-pub mod cmd;
-pub mod fetch;
+pub use types::*;
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::build::BuildAction;
+use crate::action::actions::cmd::CmdOpts;
+use crate::action::actions::write_file::execute_write_file;
 use crate::execute::types::{ActionResult, ExecuteError};
 use crate::placeholder::{self, Resolver};
-
-pub use cmd::execute_cmd;
-pub use fetch::execute_fetch;
+use actions::cmd::execute_cmd;
+use actions::fetch_url::execute_fetch_url;
 
 /// Execute a single build action.
 ///
@@ -31,27 +30,49 @@ pub use fetch::execute_fetch;
 ///
 /// The result of the action execution.
 pub async fn execute_action(
-  action: &BuildAction,
+  action: &Action,
   resolver: &impl Resolver,
   out_dir: &Path,
-  shell: Option<&str>,
 ) -> Result<ActionResult, ExecuteError> {
   match action {
-    BuildAction::FetchUrl { url, sha256 } => {
+    Action::FetchUrl { url, sha256 } => {
       // Resolve placeholders in URL (unusual but possible)
       let resolved_url = placeholder::substitute(url, resolver)?;
       let resolved_sha256 = placeholder::substitute(sha256, resolver)?;
 
-      let path = execute_fetch(&resolved_url, &resolved_sha256, out_dir).await?;
+      let path = execute_fetch_url(&resolved_url, &resolved_sha256, out_dir).await?;
 
       Ok(ActionResult {
         output: path.to_string_lossy().to_string(),
       })
     }
 
-    BuildAction::Cmd { cmd, env, cwd } => {
+    Action::WriteFile { path, contents } => {
+      let resolved_path = placeholder::substitute(path, resolver)?;
+      let resolved_contents = placeholder::substitute(contents, resolver)?;
+
+      let full_path = out_dir.join(resolved_path);
+      execute_write_file(&full_path, &resolved_contents).await?;
+
+      Ok(ActionResult {
+        output: full_path.to_string_lossy().to_string(),
+      })
+    }
+
+    Action::Cmd(opts) => {
+      let CmdOpts { cmd, args, env, cwd } = opts;
       // Resolve placeholders in command, env, and cwd
       let resolved_cmd = placeholder::substitute(cmd, resolver)?;
+
+      let resolved_args = if let Some(args) = args {
+        let mut resolved = Vec::new();
+        for arg in args {
+          resolved.push(placeholder::substitute(arg, resolver)?);
+        }
+        Some(resolved)
+      } else {
+        None
+      };
 
       let resolved_env = if let Some(env) = env {
         let mut resolved = BTreeMap::new();
@@ -71,10 +92,10 @@ pub async fn execute_action(
 
       let output = execute_cmd(
         &resolved_cmd,
+        resolved_args.as_ref(),
         resolved_env.as_ref(),
         resolved_cwd.as_deref(),
         out_dir,
-        shell,
       )
       .await?;
 
@@ -87,6 +108,7 @@ pub async fn execute_action(
 mod tests {
   use super::*;
   use crate::placeholder::PlaceholderError;
+  use crate::util::testutil::{ECHO_BIN, shell_echo_env};
   use tempfile::TempDir;
 
   /// Simple test resolver that returns fixed values.
@@ -137,32 +159,20 @@ mod tests {
     }
   }
 
-  /// Get an echo command that prints an environment variable.
-  /// Unix: echo $VAR
-  /// Windows: echo %VAR%
-  #[cfg(unix)]
-  fn echo_env(var: &str) -> String {
-    format!("echo ${}", var)
-  }
-
-  #[cfg(windows)]
-  fn echo_env(var: &str) -> String {
-    format!("echo %{}%", var)
-  }
-
   #[tokio::test]
   async fn execute_cmd_action() {
     let temp_dir = TempDir::new().unwrap();
     let out_dir = temp_dir.path();
     let resolver = TestResolver::new(out_dir.to_str().unwrap());
 
-    let action = BuildAction::Cmd {
-      cmd: "echo hello".to_string(),
+    let action = Action::Cmd(CmdOpts {
+      cmd: ECHO_BIN.to_string(),
+      args: Some(vec!["hello".to_string()]),
       env: None,
       cwd: None,
-    };
+    });
 
-    let result = execute_action(&action, &resolver, out_dir, None).await.unwrap();
+    let result = execute_action(&action, &resolver, out_dir).await.unwrap();
 
     assert_eq!(result.output, "hello");
   }
@@ -173,13 +183,14 @@ mod tests {
     let out_dir = temp_dir.path();
     let resolver = TestResolver::new(out_dir.to_str().unwrap());
 
-    let action = BuildAction::Cmd {
-      cmd: "echo $${out}".to_string(),
+    let action = Action::Cmd(CmdOpts {
+      cmd: ECHO_BIN.to_string(),
+      args: Some(vec!["$${out}".to_string()]),
       env: None,
       cwd: None,
-    };
+    });
 
-    let result = execute_action(&action, &resolver, out_dir, None).await.unwrap();
+    let result = execute_action(&action, &resolver, out_dir).await.unwrap();
 
     assert_eq!(result.output, out_dir.to_string_lossy());
   }
@@ -190,13 +201,14 @@ mod tests {
     let out_dir = temp_dir.path();
     let resolver = TestResolver::new(out_dir.to_str().unwrap()).with_action("/path/to/file.tar.gz");
 
-    let action = BuildAction::Cmd {
-      cmd: "echo $${action:0}".to_string(),
+    let action = Action::Cmd(CmdOpts {
+      cmd: ECHO_BIN.to_string(),
+      args: Some(vec!["$${action:0}".to_string()]),
       env: None,
       cwd: None,
-    };
+    });
 
-    let result = execute_action(&action, &resolver, out_dir, None).await.unwrap();
+    let result = execute_action(&action, &resolver, out_dir).await.unwrap();
 
     assert_eq!(result.output, "/path/to/file.tar.gz");
   }
@@ -210,13 +222,15 @@ mod tests {
     let mut env = BTreeMap::new();
     env.insert("OUT_DIR".to_string(), "$${out}".to_string());
 
-    let action = BuildAction::Cmd {
-      cmd: echo_env("OUT_DIR"),
+    let (cmd, args) = shell_echo_env("OUT_DIR");
+    let action = Action::Cmd(CmdOpts {
+      cmd: cmd.to_string(),
+      args: Some(args),
       env: Some(env),
       cwd: None,
-    };
+    });
 
-    let result = execute_action(&action, &resolver, out_dir, None).await.unwrap();
+    let result = execute_action(&action, &resolver, out_dir).await.unwrap();
 
     assert_eq!(result.output, out_dir.to_string_lossy());
   }

@@ -429,7 +429,7 @@ async fn destroy_removed_binds(
 
     // Execute destroy
     info!(bind = %hash.0, "destroying bind");
-    if let Err(e) = destroy_bind(hash, bind_def, &bind_result, &resolver, config).await {
+    if let Err(e) = destroy_bind(hash, bind_def, &bind_result, &resolver).await {
       error!(bind = %hash.0, error = %e, "failed to destroy bind");
       return Err(DestroyPhaseError {
         destroyed,
@@ -576,7 +576,6 @@ async fn restore_destroyed_binds(
     for (hash, bind_def) in binds_to_restore {
       let hash = hash.clone();
       let bind_def = bind_def.clone();
-      let config = config.clone();
       let completed_builds = completed_builds.clone();
       let completed_binds = completed_binds.clone();
       let semaphore = semaphore.clone();
@@ -587,7 +586,7 @@ async fn restore_destroyed_binds(
 
         let resolver = ExecutionResolver::new(&completed_builds, &completed_binds, &manifest, "/tmp", system);
 
-        let result = apply_bind(&hash, &bind_def, &resolver, &config)
+        let result = apply_bind(&hash, &bind_def, &resolver)
           .await
           .map_err(|e| ApplyError::RestoreFailed {
             hash: hash.clone(),
@@ -642,7 +641,6 @@ mod tests {
       execute: ExecuteConfig {
         parallelism: 1,
         system: false,
-        shell: None,
       },
       system: false,
       dry_run: false,

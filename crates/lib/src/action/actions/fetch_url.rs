@@ -25,7 +25,7 @@ use crate::execute::types::ExecuteError;
 /// # Returns
 ///
 /// The path to the downloaded file on success.
-pub async fn execute_fetch(url: &str, expected_sha256: &str, out_dir: &Path) -> Result<PathBuf, ExecuteError> {
+pub async fn execute_fetch_url(url: &str, expected_sha256: &str, out_dir: &Path) -> Result<PathBuf, ExecuteError> {
   info!(url = %url, "fetching URL");
 
   // Create downloads directory
