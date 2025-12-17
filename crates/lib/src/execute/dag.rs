@@ -467,7 +467,7 @@ mod tests {
 
   use super::*;
   use crate::action::Action;
-  use crate::action::actions::cmd::CmdOpts;
+  use crate::action::actions::exec::ExecOpts;
   use crate::bind::BindDef;
   use crate::build::BuildDef;
   use crate::util::hash::Hashable;
@@ -477,8 +477,8 @@ mod tests {
       name: name.to_string(),
       version: None,
       inputs,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: "echo".to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: "echo".to_string(),
         args: Some(vec![name.to_string()]),
         env: None,
         cwd: None,
@@ -490,8 +490,8 @@ mod tests {
   fn make_bind(inputs: Option<BindInputs>) -> BindDef {
     BindDef {
       inputs,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: "echo".to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: "echo".to_string(),
         args: Some(vec!["test".to_string()]),
         env: None,
         cwd: None,

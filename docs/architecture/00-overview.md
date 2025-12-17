@@ -64,27 +64,27 @@ Output: immutable store object    Output: system side effects
 
 All user-facing APIs (`lib.file.setup()`, `lib.env.setup()`, `lib.user.setup()`, `package.setup()`) internally create builds and/or binds.
 
-## The `cmd` Action
+## The `exec` Action
 
-Both builds and binds use a flexible `cmd` action for executing platform-specific operations:
+Both builds and binds use a flexible `exec` action for executing platform-specific operations:
 
 ```lua
 -- Build context: execute commands during build
 sys.build({
   name = "my-tool",
   apply = function(inputs, ctx)
-    local build_dir = ctx:cmd({ cmd = "make", cwd = "/build" })
-    ctx:cmd({ cmd = "make install", env = { PREFIX = build_dir } })
+    local build_dir = ctx:exec({ bin = "make", cwd = "/build" })
+    ctx:exec({ bin = "make install", env = { PREFIX = build_dir } })
   end,
 })
 
 -- Bind context: apply and destroy are separate functions
 sys.bind({
   apply = function(inputs, ctx)
-    ctx:cmd('ln -s "/src" "/dest"')
+    ctx:exec('ln -s "/src" "/dest"')
   end,
   destroy = function(inputs, ctx)  -- Optional: for rollback support
-    ctx:cmd('rm "/dest"')
+    ctx:exec('rm "/dest"')
   end,
 })
 ```
@@ -196,9 +196,9 @@ Separating build from deployment (bind) provides:
 - **Safe**: No arbitrary system access from config
 - **Embeddable**: mlua provides excellent Rust integration
 
-### Why `cmd` Instead of Preset Actions?
+### Why `exec` Instead of Preset Actions?
 
-The `cmd` action provides maximum flexibility:
+The `exec` action provides maximum flexibility:
 
 - **Platform-specific**: Lua config decides what commands to run per platform
 - **No Rust changes**: Adding new operations doesn't require Rust code changes

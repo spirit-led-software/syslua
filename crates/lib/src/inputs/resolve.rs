@@ -14,7 +14,7 @@
 //! - If locked but URL differs: error (requires `sys update`)
 //! - If not locked: fetch latest and add to lock file
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -91,6 +91,10 @@ pub enum ResolveError {
 ///
 /// * `raw_inputs` - Map of input names to URL strings from config
 /// * `config_dir` - Directory containing the config file (for lock file and relative paths)
+/// * `force_update` - Optional set of input names to force update (ignore lock file).
+///   - `None`: use lock file revisions when available (normal behavior)
+///   - `Some(empty set)`: force update all inputs
+///   - `Some(non-empty set)`: force update only the named inputs
 ///
 /// # Returns
 ///
@@ -109,6 +113,7 @@ pub enum ResolveError {
 pub fn resolve_inputs(
   raw_inputs: &HashMap<String, String>,
   config_dir: &Path,
+  force_update: Option<&HashSet<String>>,
 ) -> Result<ResolutionResult, ResolveError> {
   let lock_path = config_dir.join(LOCK_FILENAME);
 
@@ -136,8 +141,14 @@ pub fn resolve_inputs(
     // Check lock file for existing entry
     let locked_entry = lock_file.get(name);
 
-    // Verify URL hasn't changed (if locked)
-    if let Some(locked) = locked_entry
+    // Determine if this input should be force-updated (ignore lock)
+    let should_force = force_update
+      .map(|set| set.is_empty() || set.contains(name))
+      .unwrap_or(false);
+
+    // Verify URL hasn't changed (if locked and not force-updating)
+    if !should_force
+      && let Some(locked) = locked_entry
       && locked.url != *url
     {
       return Err(ResolveError::LockMismatch {
@@ -153,10 +164,13 @@ pub fn resolve_inputs(
         rev: config_rev,
       } => {
         // Determine which rev to use:
-        // 1. Config-specified rev takes precedence (user explicitly requested it)
-        // 2. Lock file rev (for reproducibility)
-        // 3. None (will fetch HEAD)
-        let target_rev = config_rev.as_deref().or(locked_entry.map(|e| e.rev.as_str()));
+        // 1. If force-updating: only use config-specified rev (or fetch HEAD)
+        // 2. Otherwise: config rev takes precedence, then lock file rev
+        let target_rev = if should_force {
+          config_rev.as_deref()
+        } else {
+          config_rev.as_deref().or(locked_entry.map(|e| e.rev.as_str()))
+        };
 
         let (path, actual_rev) =
           fetch_git(name, &git_url, target_rev, &inputs_cache_dir).map_err(|e| ResolveError::Fetch {
@@ -166,13 +180,13 @@ pub fn resolve_inputs(
 
         // Add/update lock entry if:
         // - Not already locked, OR
+        // - Force updating this input, OR
         // - Config specifies a rev that differs from locked rev
         let should_update_lock = match locked_entry {
           None => true,
           Some(locked) => {
-            // If config specifies a rev, lock to the resolved commit hash
-            // This handles the case where config says `#main` and we resolve to actual commit
-            config_rev.is_some() && locked.rev != actual_rev
+            // Update if force-updating or if config specifies a new rev
+            should_force || (config_rev.is_some() && locked.rev != actual_rev)
           }
         };
 
@@ -266,7 +280,7 @@ mod tests {
       let temp_dir = TempDir::new().unwrap();
       let raw_inputs = HashMap::new();
 
-      let result = resolve_inputs(&raw_inputs, temp_dir.path()).unwrap();
+      let result = resolve_inputs(&raw_inputs, temp_dir.path(), None).unwrap();
 
       assert!(result.inputs.is_empty());
       assert!(!result.lock_changed);
@@ -284,7 +298,7 @@ mod tests {
       let mut raw_inputs = HashMap::new();
       raw_inputs.insert("local".to_string(), "path:./my-input".to_string());
 
-      let result = resolve_inputs(&raw_inputs, config_dir).unwrap();
+      let result = resolve_inputs(&raw_inputs, config_dir, None).unwrap();
 
       assert_eq!(result.inputs.len(), 1);
       let resolved = result.inputs.get("local").unwrap();
@@ -310,7 +324,7 @@ mod tests {
       let mut raw_inputs = HashMap::new();
       raw_inputs.insert("myinput".to_string(), "git:https://new-url.com/repo.git".to_string());
 
-      let result = resolve_inputs(&raw_inputs, config_dir);
+      let result = resolve_inputs(&raw_inputs, config_dir, None);
 
       assert!(matches!(result, Err(ResolveError::LockMismatch { .. })));
     }
@@ -322,7 +336,7 @@ mod tests {
       let mut raw_inputs = HashMap::new();
       raw_inputs.insert("bad".to_string(), "invalid-url".to_string());
 
-      let result = resolve_inputs(&raw_inputs, temp_dir.path());
+      let result = resolve_inputs(&raw_inputs, temp_dir.path(), None);
 
       assert!(matches!(result, Err(ResolveError::Parse { .. })));
     }
@@ -334,7 +348,7 @@ mod tests {
       let mut raw_inputs = HashMap::new();
       raw_inputs.insert("missing".to_string(), "path:./does-not-exist".to_string());
 
-      let result = resolve_inputs(&raw_inputs, temp_dir.path());
+      let result = resolve_inputs(&raw_inputs, temp_dir.path(), None);
 
       assert!(matches!(result, Err(ResolveError::Fetch { .. })));
     }

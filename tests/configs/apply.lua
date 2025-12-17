@@ -14,8 +14,19 @@
 ---
 ---   # Modify this file (e.g., add/remove a bind) and re-apply to test diff
 
--- Standard PATH for commands (syslua isolates the environment for reproducibility)
-local PATH = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+--- Execute a shell command (cross-platform)
+--- @param ctx ActionCtx
+--- @param script string
+--- @return string
+local function sh(ctx, script)
+  if package.config:sub(1, 1) == '\\' then
+    -- Windows: use cmd.exe
+    return ctx:exec({ bin = 'cmd.exe', args = { '/c', script } })
+  else
+    -- Unix: use /bin/sh
+    return ctx:exec({ bin = '/bin/sh', args = { '-c', script } })
+  end
+end
 
 return {
   inputs = {},
@@ -27,16 +38,16 @@ return {
       version = '1.0.0',
       apply = function(_, ctx)
         -- ctx.out returns the $${out} placeholder
-        ctx:cmd({ cmd = 'mkdir -p ' .. ctx.out .. '/bin', env = { PATH = PATH } })
-        ctx:cmd({
-          cmd = string.format(
+        sh(ctx, 'mkdir -p ' .. ctx.out .. '/bin')
+        sh(
+          ctx,
+          string.format(
             [[echo '#!/bin/sh
 echo "Hello from greeter!"' > %s/bin/greet]],
             ctx.out
-          ),
-          env = { PATH = PATH },
-        })
-        ctx:cmd({ cmd = 'chmod +x ' .. ctx.out .. '/bin/greet', env = { PATH = PATH } })
+          )
+        )
+        sh(ctx, 'chmod +x ' .. ctx.out .. '/bin/greet')
 
         return {
           out = ctx.out,
@@ -50,12 +61,9 @@ echo "Hello from greeter!"' > %s/bin/greet]],
       name = 'counter',
       version = '1.0.0',
       apply = function(_, ctx)
-        ctx:cmd({ cmd = 'mkdir -p ' .. ctx.out .. '/bin', env = { PATH = PATH } })
-        ctx:cmd({
-          cmd = "echo '#!/bin/sh\nseq 1 10' > " .. ctx.out .. '/bin/count',
-          env = { PATH = PATH },
-        })
-        ctx:cmd({ cmd = 'chmod +x ' .. ctx.out .. '/bin/count', env = { PATH = PATH } })
+        sh(ctx, 'mkdir -p ' .. ctx.out .. '/bin')
+        sh(ctx, "echo '#!/bin/sh\nseq 1 10' > " .. ctx.out .. '/bin/count')
+        sh(ctx, 'chmod +x ' .. ctx.out .. '/bin/count')
 
         return {
           out = ctx.out,
@@ -71,17 +79,17 @@ echo "Hello from greeter!"' > %s/bin/greet]],
       version = '1.0.0',
       inputs = { greeter = greeter },
       apply = function(build_inputs, ctx)
-        ctx:cmd({ cmd = 'mkdir -p ' .. ctx.out .. '/bin', env = { PATH = PATH } })
+        sh(ctx, 'mkdir -p ' .. ctx.out .. '/bin')
         -- Create a wrapper script that calls greeter
-        ctx:cmd({
-          cmd = "echo '#!/bin/sh\n"
+        sh(
+          ctx,
+          "echo '#!/bin/sh\n"
             .. build_inputs.greeter.outputs.bin
             .. ' && echo "Wrapper done!"\' > '
             .. ctx.out
-            .. '/bin/wrap',
-          env = { PATH = PATH },
-        })
-        ctx:cmd({ cmd = 'chmod +x ' .. ctx.out .. '/bin/wrap', env = { PATH = PATH } })
+            .. '/bin/wrap'
+        )
+        sh(ctx, 'chmod +x ' .. ctx.out .. '/bin/wrap')
 
         return {
           out = ctx.out,
@@ -95,15 +103,12 @@ echo "Hello from greeter!"' > %s/bin/greet]],
     sys.bind({
       inputs = { greeter = greeter },
       apply = function(bind_inputs, ctx)
-        ctx:cmd({ cmd = 'mkdir -p /tmp/syslua-test', env = { PATH = PATH } })
-        ctx:cmd({
-          cmd = 'ln -sf ' .. bind_inputs.greeter.outputs.bin .. ' /tmp/syslua-test/greet',
-          env = { PATH = PATH },
-        })
+        sh(ctx, 'mkdir -p /tmp/syslua-test')
+        sh(ctx, 'ln -sf ' .. bind_inputs.greeter.outputs.bin .. ' /tmp/syslua-test/greet')
         return { link = '/tmp/syslua-test/greet' }
       end,
       destroy = function(_, ctx)
-        ctx:cmd({ cmd = 'rm -f /tmp/syslua-test/greet', env = { PATH = PATH } })
+        sh(ctx, 'rm -f /tmp/syslua-test/greet')
       end,
     })
 
@@ -112,15 +117,12 @@ echo "Hello from greeter!"' > %s/bin/greet]],
     sys.bind({
       inputs = { counter = counter },
       apply = function(bind_inputs, ctx)
-        ctx:cmd({ cmd = 'mkdir -p /tmp/syslua-test', env = { PATH = PATH } })
-        ctx:cmd({
-          cmd = 'ln -sf ' .. bind_inputs.counter.outputs.bin .. ' /tmp/syslua-test/count',
-          env = { PATH = PATH },
-        })
+        sh(ctx, 'mkdir -p /tmp/syslua-test')
+        sh(ctx, 'ln -sf ' .. bind_inputs.counter.outputs.bin .. ' /tmp/syslua-test/count')
         return { link = '/tmp/syslua-test/count' }
       end,
       destroy = function(outputs, ctx)
-        ctx:cmd({ cmd = 'rm -f ' .. outputs.link, env = { PATH = PATH } })
+        sh(ctx, 'rm -f ' .. outputs.link)
       end,
     })
 
@@ -129,15 +131,12 @@ echo "Hello from greeter!"' > %s/bin/greet]],
     sys.bind({
       inputs = { wrapper = wrapper },
       apply = function(bind_inputs, ctx)
-        ctx:cmd({ cmd = 'mkdir -p /tmp/syslua-test', env = { PATH = PATH } })
-        ctx:cmd({
-          cmd = 'ln -sf ' .. bind_inputs.wrapper.outputs.bin .. ' /tmp/syslua-test/wrap',
-          env = { PATH = PATH },
-        })
+        sh(ctx, 'mkdir -p /tmp/syslua-test')
+        sh(ctx, 'ln -sf ' .. bind_inputs.wrapper.outputs.bin .. ' /tmp/syslua-test/wrap')
         return { link = '/tmp/syslua-test/wrap' }
       end,
       destroy = function(outputs, ctx)
-        ctx:cmd({ cmd = 'rm -f ' .. outputs.link, env = { PATH = PATH } })
+        sh(ctx, 'rm -f ' .. outputs.link)
       end,
     })
 
@@ -146,14 +145,11 @@ echo "Hello from greeter!"' > %s/bin/greet]],
     sys.bind({
       outputs = { marker = '/tmp/syslua-test/marker.txt' },
       apply = function(_, ctx)
-        ctx:cmd({ cmd = 'mkdir -p /tmp/syslua-test', env = { PATH = PATH } })
-        ctx:cmd({
-          cmd = 'echo "Applied at $(date)" > /tmp/syslua-test/marker.txt',
-          env = { PATH = PATH },
-        })
+        sh(ctx, 'mkdir -p /tmp/syslua-test')
+        sh(ctx, 'echo "Applied at $(date)" > /tmp/syslua-test/marker.txt')
       end,
       destroy = function(_, ctx)
-        ctx:cmd({ cmd = 'rm -f /tmp/syslua-test/marker.txt', env = { PATH = PATH } })
+        sh(ctx, 'rm -f /tmp/syslua-test/marker.txt')
       end,
     })
 
@@ -162,7 +158,7 @@ echo "Hello from greeter!"' > %s/bin/greet]],
     sys.bind({
       inputs = { greeter = greeter, counter = counter },
       apply = function(bind_inputs, ctx)
-        ctx:cmd({ cmd = 'mkdir -p /tmp/syslua-test', env = { PATH = PATH } })
+        sh(ctx, 'mkdir -p /tmp/syslua-test')
         local content = '# syslua test environment\\n'
           .. 'export GREETER_BIN='
           .. bind_inputs.greeter.outputs.bin
@@ -170,14 +166,11 @@ echo "Hello from greeter!"' > %s/bin/greet]],
           .. 'export COUNTER_BIN='
           .. bind_inputs.counter.outputs.bin
           .. '\\n'
-        ctx:cmd({
-          cmd = 'printf "' .. content .. '" > /tmp/syslua-test/env.sh',
-          env = { PATH = PATH },
-        })
+        sh(ctx, 'printf "' .. content .. '" > /tmp/syslua-test/env.sh')
         return { env = '/tmp/syslua-test/env.sh' }
       end,
       destroy = function(outputs, ctx)
-        ctx:cmd({ cmd = 'rm -f ' .. outputs.env, env = { PATH = PATH } })
+        sh(ctx, 'rm -f ' .. outputs.env)
       end,
     })
   end,

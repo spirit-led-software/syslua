@@ -7,11 +7,11 @@ pub use types::*;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::action::actions::cmd::CmdOpts;
+use crate::action::actions::exec::ExecOpts;
 use crate::action::actions::write_file::execute_write_file;
 use crate::execute::types::{ActionResult, ExecuteError};
 use crate::placeholder::{self, Resolver};
-use actions::cmd::execute_cmd;
+use actions::exec::execute_cmd;
 use actions::fetch_url::execute_fetch_url;
 
 /// Execute a single build action.
@@ -24,7 +24,6 @@ use actions::fetch_url::execute_fetch_url;
 /// * `action` - The action to execute
 /// * `resolver` - The placeholder resolver for this build
 /// * `out_dir` - The build's output directory
-/// * `shell` - Optional shell override for Cmd actions
 ///
 /// # Returns
 ///
@@ -59,8 +58,13 @@ pub async fn execute_action(
       })
     }
 
-    Action::Cmd(opts) => {
-      let CmdOpts { cmd, args, env, cwd } = opts;
+    Action::Exec(opts) => {
+      let ExecOpts {
+        bin: cmd,
+        args,
+        env,
+        cwd,
+      } = opts;
       // Resolve placeholders in command, env, and cwd
       let resolved_cmd = placeholder::substitute(cmd, resolver)?;
 
@@ -166,8 +170,8 @@ mod tests {
     let resolver = TestResolver::new(out_dir.to_str().unwrap());
 
     let (cmd, args) = echo_msg("hello");
-    let action = Action::Cmd(CmdOpts {
-      cmd: cmd.to_string(),
+    let action = Action::Exec(ExecOpts {
+      bin: cmd.to_string(),
       args: Some(args),
       env: None,
       cwd: None,
@@ -185,8 +189,8 @@ mod tests {
     let resolver = TestResolver::new(out_dir.to_str().unwrap());
 
     let (cmd, args) = echo_msg("$${out}");
-    let action = Action::Cmd(CmdOpts {
-      cmd: cmd.to_string(),
+    let action = Action::Exec(ExecOpts {
+      bin: cmd.to_string(),
       args: Some(args),
       env: None,
       cwd: None,
@@ -204,8 +208,8 @@ mod tests {
     let resolver = TestResolver::new(out_dir.to_str().unwrap()).with_action("/path/to/file.tar.gz");
 
     let (cmd, args) = echo_msg("$${action:0}");
-    let action = Action::Cmd(CmdOpts {
-      cmd: cmd.to_string(),
+    let action = Action::Exec(ExecOpts {
+      bin: cmd.to_string(),
       args: Some(args),
       env: None,
       cwd: None,
@@ -226,8 +230,8 @@ mod tests {
     env.insert("OUT_DIR".to_string(), "$${out}".to_string());
 
     let (cmd, args) = shell_echo_env("OUT_DIR");
-    let action = Action::Cmd(CmdOpts {
-      cmd: cmd.to_string(),
+    let action = Action::Exec(ExecOpts {
+      bin: cmd.to_string(),
       args: Some(args),
       env: Some(env),
       cwd: None,

@@ -1,7 +1,7 @@
 //! Lua bindings for `sys.bind{}`.
 //!
 //! This module provides:
-//! - `ActionCtx` as LuaUserData with methods like `cmd`
+//! - `ActionCtx` as LuaUserData with methods like `exec`
 //! - `register_sys_bind()` to register the `sys.bind` function
 
 use std::cell::RefCell;
@@ -344,7 +344,7 @@ mod tests {
           r#"
                 return sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                     end,
                 })
             "#,
@@ -378,7 +378,7 @@ mod tests {
           r#"
                 return sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                         return { link = "/dest" }
                     end,
                 })
@@ -410,10 +410,10 @@ mod tests {
           r#"
                 return sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                     end,
                     destroy = function(inputs, ctx)
-                        ctx:cmd("rm /dest")
+                        ctx:exec("rm /dest")
                     end,
                 })
             "#,
@@ -439,7 +439,7 @@ mod tests {
                 local pkg = sys.build({
                     name = "my-pkg",
                     apply = function(inputs, ctx)
-                        ctx:cmd("make install")
+                        ctx:exec("make install")
                         return { out = "/store/my-pkg" }
                     end,
                 })
@@ -447,10 +447,10 @@ mod tests {
                 return sys.bind({
                     inputs = { pkg = pkg },
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf " .. inputs.pkg.outputs.out .. "/bin/app /usr/local/bin/app")
+                        ctx:exec("ln -sf " .. inputs.pkg.outputs.out .. "/bin/app /usr/local/bin/app")
                     end,
                     destroy = function(inputs, ctx)
-                        ctx:cmd("rm /usr/local/bin/app")
+                        ctx:exec("rm /usr/local/bin/app")
                     end,
                 })
             "#,
@@ -493,7 +493,7 @@ mod tests {
                 return sys.bind({
                     inputs = { src = "/path/to/source", dest = "/path/to/dest" },
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf " .. inputs.src .. " " .. inputs.dest)
+                        ctx:exec("ln -sf " .. inputs.src .. " " .. inputs.dest)
                     end,
                 })
             "#,
@@ -526,7 +526,7 @@ mod tests {
                         return { computed = "dynamic-value" }
                     end,
                     apply = function(inputs, ctx)
-                        ctx:cmd("echo " .. inputs.computed)
+                        ctx:exec("echo " .. inputs.computed)
                     end,
                 })
             "#,
@@ -558,7 +558,7 @@ mod tests {
           r#"
                 return sys.bind({
                     destroy = function(inputs, ctx)
-                        ctx:cmd("rm /dest")
+                        ctx:exec("rm /dest")
                     end,
                 })
             "#,
@@ -579,9 +579,9 @@ mod tests {
       lua
         .load(
           r#"
-                sys.bind({ apply = function(i, c) c:cmd("a") end })
-                sys.bind({ apply = function(i, c) c:cmd("b") end })
-                sys.bind({ apply = function(i, c) c:cmd("c") end })
+                sys.bind({ apply = function(i, c) c:exec("a") end })
+                sys.bind({ apply = function(i, c) c:exec("b") end })
+                sys.bind({ apply = function(i, c) c:exec("c") end })
             "#,
         )
         .exec()?;
@@ -601,10 +601,10 @@ mod tests {
                 return sys.bind({
                     inputs = { key = "value" },
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                     end,
                     destroy = function(inputs, ctx)
-                        ctx:cmd("rm /dest")
+                        ctx:exec("rm /dest")
                     end,
                 })
             "#;
@@ -628,7 +628,7 @@ mod tests {
       let code_without_destroy = r#"
                 return sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                     end,
                 })
             "#;
@@ -636,10 +636,10 @@ mod tests {
       let code_with_destroy = r#"
                 return sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                     end,
                     destroy = function(inputs, ctx)
-                        ctx:cmd("rm /dest")
+                        ctx:exec("rm /dest")
                     end,
                 })
             "#;
@@ -666,13 +666,13 @@ mod tests {
                 sys.bind({
                     inputs = { src = "/src", dest = "/dest" },
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf " .. inputs.src .. " " .. inputs.dest)
+                        ctx:exec("ln -sf " .. inputs.src .. " " .. inputs.dest)
                     end,
                 })
                 sys.bind({
                     inputs = { src = "/src", dest = "/dest" },
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf " .. inputs.src .. " " .. inputs.dest)
+                        ctx:exec("ln -sf " .. inputs.src .. " " .. inputs.dest)
                     end,
                 })
             "#,
@@ -696,7 +696,7 @@ mod tests {
                 return sys.bind({
                     inputs = { src = "/path/to/source", dest = "/path/to/dest" },
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf " .. inputs.src .. " " .. inputs.dest)
+                        ctx:exec("ln -sf " .. inputs.src .. " " .. inputs.dest)
                     end,
                 })
             "#,
@@ -723,7 +723,7 @@ mod tests {
           r#"
                 return sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                     end,
                 })
             "#,
@@ -748,7 +748,7 @@ mod tests {
                 return sys.bind({
                     apply = function(inputs, ctx)
                         -- ctx.out should return $${out} placeholder
-                        ctx:cmd("mkdir -p " .. ctx.out)
+                        ctx:exec("mkdir -p " .. ctx.out)
                         return { out = ctx.out }
                     end,
                 })
@@ -777,8 +777,8 @@ mod tests {
           r#"
                 sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("mkdir -p " .. ctx.out)
-                        ctx:cmd("ln -sf /src " .. ctx.out .. "/link")
+                        ctx:exec("mkdir -p " .. ctx.out)
+                        ctx:exec("ln -sf /src " .. ctx.out .. "/link")
                     end,
                 })
             "#,
@@ -792,13 +792,13 @@ mod tests {
       assert_eq!(bind_def.apply_actions.len(), 2);
 
       match &bind_def.apply_actions[0] {
-        Action::Cmd(opts) => {
+        Action::Exec(opts) => {
           assert!(
-            opts.cmd.contains("$${out}"),
+            opts.bin.contains("$${out}"),
             "cmd should contain ${{out}} placeholder: {}",
-            opts.cmd
+            opts.bin
           );
-          assert_eq!(opts.cmd, "mkdir -p $${out}");
+          assert_eq!(opts.bin, "mkdir -p $${out}");
         }
         _ => {
           panic!("expected Cmd action");
@@ -806,13 +806,13 @@ mod tests {
       }
 
       match &bind_def.apply_actions[1] {
-        Action::Cmd(opts) => {
+        Action::Exec(opts) => {
           assert!(
-            opts.cmd.contains("$${out}"),
+            opts.bin.contains("$${out}"),
             "cmd should contain ${{out}} placeholder: {}",
-            opts.cmd
+            opts.bin
           );
-          assert_eq!(opts.cmd, "ln -sf /src $${out}/link");
+          assert_eq!(opts.bin, "ln -sf /src $${out}/link");
         }
         _ => {
           panic!("expected Cmd action");
@@ -831,10 +831,10 @@ mod tests {
           r#"
                 sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("mkdir -p " .. ctx.out)
+                        ctx:exec("mkdir -p " .. ctx.out)
                     end,
                     destroy = function(inputs, ctx)
-                        ctx:cmd("rm -rf " .. ctx.out)
+                        ctx:exec("rm -rf " .. ctx.out)
                     end,
                 })
             "#,
@@ -849,13 +849,13 @@ mod tests {
       assert_eq!(destroy_actions.len(), 1);
 
       match &destroy_actions[0] {
-        Action::Cmd(opts) => {
+        Action::Exec(opts) => {
           assert!(
-            opts.cmd.contains("$${out}"),
+            opts.bin.contains("$${out}"),
             "destroy cmd should contain ${{out}} placeholder: {}",
-            opts.cmd
+            opts.bin
           );
-          assert_eq!(opts.cmd, "rm -rf $${out}");
+          assert_eq!(opts.bin, "rm -rf $${out}");
         }
         _ => {
           panic!("expected Cmd action");

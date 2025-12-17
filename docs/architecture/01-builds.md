@@ -64,7 +64,7 @@ sys.build({
   end,
   apply = function(inputs, ctx)
     -- inputs.rust.outputs.out is the realized output path of the rust build
-    ctx:cmd({
+    ctx:exec({
       cmd = "cargo build --release",
       env = { PATH = inputs.rust.outputs.out .. "/bin:" .. os.getenv("PATH") },
     })
@@ -92,35 +92,35 @@ The build context provides actions for fetching and shell execution. Each action
 ctx:fetch_url(url, sha256)  -- Download file, verify hash
 
 -- Shell execution (returns opaque reference to stdout)
-ctx:cmd(opts)               -- Execute a shell command
-                            -- opts: string | { cmd, env?, cwd? }
+ctx:exec(opts)               -- Execute a shell command
+                            -- opts: string | { bin, env?, cwd? }
 ```
 
-### The `cmd` Action
+### The `exec` Action
 
-The `cmd` action is the primary mechanism for executing operations during a build. This flexible approach allows Lua configuration to specify platform-specific commands rather than relying on preset Rust-backed actions:
+The `exec` action is the primary mechanism for executing operations during a build. This flexible approach allows Lua configuration to specify platform-specific commands rather than relying on preset Rust-backed actions:
 
 ```lua
 -- Simple command (string)
-ctx:cmd("make")
+ctx:exec("make")
 
 -- Command with options (table)
-ctx:cmd({
-  cmd = "make install",
+ctx:exec({
+  bin = "make install",
   cwd = "/build/src",
   env = { PREFIX = ctx.out },
 })
 ```
 
-**BuildCmdOptions:**
+**ExecOpts:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `cmd` | string | Required: the shell command to execute |
+| `bin` | string | Required: the shell command to execute |
 | `cwd` | string? | Optional: working directory for the command |
 | `env` | table<string,string>? | Optional: environment variables for the command |
 
-**Why `cmd` instead of preset actions?**
+**Why `exec` instead of preset actions?**
 
 - **Platform flexibility**: Lua config decides what commands to run per platform
 - **No Rust changes needed**: Adding new operations doesn't require Rust code changes
@@ -233,17 +233,18 @@ impl BuildCtx {
     /// that resolves to the downloaded file path at execution time
     pub fn fetch_url(&mut self, url: &str, sha256: &str) -> String;
     
-    /// Execute a shell command, returns an opaque reference
+    /// Execute a command, returns an opaque reference
     /// that resolves to the command's stdout at execution time
-    pub fn cmd(&mut self, opts: impl Into<BuildCmdOptions>) -> String;
+    pub fn exec(&mut self, opts: impl Into<ExecOpts>) -> String;
     
     /// Consume context and return accumulated actions
     pub fn into_actions(self) -> Vec<BuildAction>;
 }
 
-/// Command options for build actions
-pub struct BuildCmdOptions {
-    pub cmd: String,
+/// Command options for build and bind actions
+pub struct ExecOpts {
+    pub bin: String,
+    pub args: Option<Vec<String>>,
     pub env: Option<BTreeMap<String, String>>,
     pub cwd: Option<String>,
 }
@@ -253,7 +254,7 @@ Note: `BuildRef` is not a separate Rust struct - it's a Lua table with a metatab
 
 ### Placeholder System
 
-Both `fetch_url` and `cmd` return opaque strings that can be stored in variables and used in subsequent commands. These are resolved during execution when action outputs become available.
+Both `fetch_url` and `exec` return opaque strings that can be stored in variables and used in subsequent commands. These are resolved during execution when action outputs become available.
 
 ```lua
 apply = function(inputs, ctx)
@@ -261,7 +262,7 @@ apply = function(inputs, ctx)
   local archive = ctx:fetch_url(inputs.src.url, inputs.src.sha256)
   
   -- Use the reference in the next command - it resolves to the actual path at runtime
-  ctx:cmd({ cmd = "tar -xzf " .. archive .. " -C /build" })
+  ctx:exec({ bin = "tar -xzf " .. archive .. " -C /build" })
 end
 ```
 
@@ -292,7 +293,7 @@ local ripgrep = sys.build({
 
   apply = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.src.url, inputs.src.sha256)
-    ctx:cmd({ cmd = "tar -xzf " .. archive .. " -C " .. ctx.out })
+    ctx:exec({ bin = "tar -xzf " .. archive .. " -C " .. ctx.out })
     return { out = ctx.out }
   end,
 })
@@ -317,18 +318,18 @@ local ripgrep = sys.build({
   end,
 
   apply = function(inputs, ctx)
-    ctx:cmd({
+    ctx:exec({
       cmd = 'git clone --depth 1 --branch ' .. inputs.rev .. ' ' .. inputs.git_url .. ' /tmp/rg-src',
     })
 
-    ctx:cmd({
+    ctx:exec({
       cmd = 'cargo build --release',
       cwd = '/tmp/rg-src',
       env = { PATH = inputs.rust.outputs.out .. '/bin:' .. os.getenv('PATH') },
     })
 
-    ctx:cmd({ cmd = 'mkdir -p ' .. ctx.out .. '/bin' })
-    ctx:cmd({ cmd = 'cp /tmp/rg-src/target/release/rg ' .. ctx.out .. '/bin/rg' })
+    ctx:exec({ bin = 'mkdir -p ' .. ctx.out .. '/bin' })
+    ctx:exec({ bin = 'cp /tmp/rg-src/target/release/rg ' .. ctx.out .. '/bin/rg' })
     return { out = ctx.out }
   end,
 })
@@ -349,16 +350,16 @@ sys.build({
 
   apply = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-    ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+    ctx:exec({ bin = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
 
     if sys.os == 'darwin' then
       -- macOS-specific post-processing
-      ctx:cmd({
+      ctx:exec({
         cmd = 'install_name_tool -id @rpath/libfoo.dylib ' .. ctx.out .. '/lib/libfoo.dylib'
       })
     elseif sys.os == 'linux' then
       -- Linux-specific
-      ctx:cmd({
+      ctx:exec({
         cmd = "patchelf --set-rpath '$ORIGIN' " .. ctx.out .. '/lib/libfoo.so'
       })
     end
@@ -383,7 +384,7 @@ local file_build = sys.build({
   name = 'file-gitconfig',
   inputs = { source = './dotfiles/gitconfig' },
   apply = function(inputs, ctx)
-    ctx:cmd({ cmd = 'cp ' .. inputs.source .. ' ' .. ctx.out .. '/content' })
+    ctx:exec({ bin = 'cp ' .. inputs.source .. ' ' .. ctx.out .. '/content' })
     return { out = ctx.out }
   end,
 })
@@ -391,10 +392,10 @@ local file_build = sys.build({
 sys.bind({
   inputs = { build = file_build, target = '~/.gitconfig' },
   apply = function(inputs, ctx)
-    ctx:cmd('ln -sf ' .. inputs.build.outputs.out .. '/content ' .. inputs.target)
+    ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/content ' .. inputs.target)
   end,
   destroy = function(inputs, ctx)
-    ctx:cmd('rm ' .. inputs.target)
+    ctx:exec('rm ' .. inputs.target)
   end,
 })
 ```
@@ -411,10 +412,10 @@ local env_build = sys.build({
   inputs = { vars = { EDITOR = 'nvim', PAGER = 'less' } },
   apply = function(inputs, ctx)
     -- Generate shell-specific fragments
-    ctx:cmd({
+    ctx:exec({
       cmd = 'echo \'export EDITOR="nvim"\nexport PAGER="less"\' > ' .. ctx.out .. '/env.sh'
     })
-    ctx:cmd({
+    ctx:exec({
       cmd = 'echo \'set -gx EDITOR "nvim"\nset -gx PAGER "less"\' > ' .. ctx.out .. '/env.fish'
     })
     return { out = ctx.out }

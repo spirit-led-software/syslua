@@ -245,7 +245,7 @@ impl<R: Resolver> Resolver for BindDestroyResolver<'_, R> {
 mod tests {
   use super::*;
   use crate::util::testutil::{echo_msg, shell_cmd};
-  use crate::{action::actions::cmd::CmdOpts, placeholder::PlaceholderError, util::hash::Hashable};
+  use crate::{action::actions::exec::ExecOpts, placeholder::PlaceholderError, util::hash::Hashable};
   use serial_test::serial;
 
   /// Simple test resolver that returns fixed values.
@@ -315,8 +315,8 @@ mod tests {
     let (cmd, args) = echo_msg("applied");
     BindDef {
       inputs: None,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
@@ -345,8 +345,8 @@ mod tests {
     let (cmd, args) = echo_msg("/path/to/link");
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
@@ -368,8 +368,8 @@ mod tests {
     let (cmd, args) = echo_msg("$${out}");
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
@@ -399,8 +399,8 @@ mod tests {
     let (cmd, args) = echo_msg("$${build:abc123:bin}");
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
@@ -426,8 +426,8 @@ mod tests {
     let (destroy_cmd, destroy_args) = echo_msg("destroyed");
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: apply_cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: apply_cmd.to_string(),
         args: Some(apply_args),
         env: None,
         cwd: None,
@@ -437,8 +437,8 @@ mod tests {
           .into_iter()
           .collect(),
       ),
-      destroy_actions: Some(vec![Action::Cmd(CmdOpts {
-        cmd: destroy_cmd.to_string(),
+      destroy_actions: Some(vec![Action::Exec(ExecOpts {
+        bin: destroy_cmd.to_string(),
         args: Some(destroy_args),
         env: None,
         cwd: None,
@@ -479,8 +479,8 @@ mod tests {
     let (cmd, args) = shell_cmd("exit 1");
     let bind_def = BindDef {
       inputs: None,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
@@ -505,20 +505,20 @@ mod tests {
     let bind_def = BindDef {
       inputs: None,
       apply_actions: vec![
-        Action::Cmd(CmdOpts {
-          cmd: cmd1.to_string(),
+        Action::Exec(ExecOpts {
+          bin: cmd1.to_string(),
           args: Some(args1),
           env: None,
           cwd: None,
         }),
-        Action::Cmd(CmdOpts {
-          cmd: cmd2.to_string(),
+        Action::Exec(ExecOpts {
+          bin: cmd2.to_string(),
           args: Some(args2),
           env: None,
           cwd: None,
         }),
-        Action::Cmd(CmdOpts {
-          cmd: cmd3.to_string(),
+        Action::Exec(ExecOpts {
+          bin: cmd3.to_string(),
           args: Some(args3),
           env: None,
           cwd: None,

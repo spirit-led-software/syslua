@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::action::actions::cmd::CmdOpts;
+use crate::action::actions::exec::ExecOpts;
+
+/// Key for storing registered ctx methods in Lua's registry.
+pub const CTX_METHODS_REGISTRY_KEY: &str = "__syslua_ctx_methods";
 
 /// An action that can be performed during build execution.
 ///
@@ -37,15 +40,12 @@ pub enum Action {
   /// - `path`: The file path to write to
   /// - `contents`: The contents to write into the file
   WriteFile { path: String, contents: String },
-  /// Execute a shell command.
+  /// Execute a binary.
   ///
   /// # Fields
   ///
-  /// - `cmd`: The command string to execute (passed to shell)
-  /// - `args`: Optional arguments for the command
-  /// - `env`: Optional environment variables to set
-  /// - `cwd`: Optional working directory (may contain placeholders)
-  Cmd(CmdOpts),
+  /// - `opts`: Execution options
+  Exec(ExecOpts),
 }
 
 /// Context passed to build `apply` functions for recording actions.
@@ -72,8 +72,8 @@ pub enum Action {
 ///     name = "ripgrep",
 ///     apply = function(ctx)
 ///         local archive = ctx:fetch_url("https://...", "sha256...")
-///         ctx:cmd("tar xf " .. archive)
-///         return { out = ctx:cmd("...") }
+///         ctx:exec("tar xf " .. archive)
+///         return { out = ctx:exec("...") }
 ///     end
 /// }
 /// ```
@@ -105,14 +105,21 @@ impl ActionCtx {
   /// sys.build {
   ///     name = "my-tool",
   ///     apply = function(inputs, ctx)
-  ///         ctx:cmd("mkdir -p " .. ctx.out .. "/bin")
-  ///         ctx:cmd("cp binary " .. ctx.out .. "/bin/")
+  ///         ctx:exec("mkdir -p " .. ctx.out .. "/bin")
+  ///         ctx:exec("cp binary " .. ctx.out .. "/bin/")
   ///         return { out = ctx.out }
   ///     end
   /// }
   /// ```
   pub fn out(&self) -> &'static str {
     "$${out}"
+  }
+
+  pub fn write_file(&mut self, path: &str, contents: &str) -> String {
+    self.record_action(Action::WriteFile {
+      path: path.to_string(),
+      contents: contents.to_string(),
+    })
   }
 
   /// Record a URL fetch action and return a placeholder for its output.
@@ -148,9 +155,9 @@ impl ActionCtx {
   ///
   /// An opaque placeholder string (e.g., `$${action:1}`) that resolves to
   /// the command's output at execution time.
-  pub fn cmd(&mut self, opts: impl Into<CmdOpts>) -> String {
+  pub fn exec(&mut self, opts: impl Into<ExecOpts>) -> String {
     let opts = opts.into();
-    self.record_action(Action::Cmd(opts))
+    self.record_action(Action::Exec(opts))
   }
 
   /// Internal helper to record an action and return its placeholder.
@@ -180,7 +187,7 @@ mod tests {
     let mut ctx = ActionCtx::new();
 
     let p0 = ctx.fetch_url("https://example.com/a.tar.gz", "hash1");
-    let p1 = ctx.cmd("tar xf a.tar.gz");
+    let p1 = ctx.exec("tar xf a.tar.gz");
     let p2 = ctx.fetch_url("https://example.com/b.tar.gz", "hash2");
 
     // All actions use the same placeholder format with sequential indices
@@ -195,14 +202,14 @@ mod tests {
     let mut env = BTreeMap::new();
     env.insert("CC".to_string(), "clang".to_string());
 
-    ctx.cmd(CmdOpts::new("make").with_env(env.clone()).with_cwd("/build"));
+    ctx.exec(ExecOpts::new("make").with_env(env.clone()).with_cwd("/build"));
 
     let actions = ctx.into_actions();
     assert_eq!(actions.len(), 1);
 
     match &actions[0] {
-      Action::Cmd(opts) => {
-        assert_eq!(opts.cmd, "make");
+      Action::Exec(opts) => {
+        assert_eq!(opts.bin, "make");
         assert_eq!(opts.env, Some(env));
         assert_eq!(opts.cwd, Some("/build".to_string()));
       }

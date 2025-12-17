@@ -122,6 +122,42 @@ return M
 | `sys.bind()`  | Create a bind (side effects)       | [Binds](./02-binds.md)       |
 | `input()`    | Declare an input source             | [Inputs](./06-inputs.md)     |
 
+### Custom ActionCtx Methods
+
+`sys.register_ctx_method()` allows Lua libraries to extend `ActionCtx` with custom methods that compose existing primitives. This enables higher-level abstractions while keeping actions properly recorded.
+
+```lua
+-- Register a cross-platform mkdir helper
+sys.register_ctx_method("mkdir", function(ctx, path)
+  if sys.os == "windows" then
+    return ctx:exec({ bin = "cmd.exe", args = { "/c", "mkdir", path } })
+  else
+    return ctx:exec({ bin = "/bin/mkdir", args = { "-p", path } })
+  end
+end)
+
+-- Now available on any ActionCtx:
+sys.build({
+  name = "my-tool",
+  apply = function(inputs, ctx)
+    ctx:mkdir(ctx.out .. "/bin")  -- Uses the registered method
+    return { out = ctx.out }
+  end,
+})
+```
+
+| Function | Purpose |
+| -------- | ------- |
+| `sys.register_ctx_method(name, fn)` | Register a custom method on `ActionCtx` |
+| `sys.unregister_ctx_method(name)` | Remove a previously registered method |
+
+**Rules:**
+- Built-in methods (`exec`, `fetch_url`, `write_file`, `out`) cannot be overridden
+- Registered methods receive `(ctx, ...)` when called with `:` syntax
+- Actions called within registered methods are recorded normally
+- Registration is global—methods are available to all subsequent builds/binds
+- Unknown method calls produce helpful error messages suggesting `sys.register_ctx_method`
+
 ### Convenience Helpers (Lua, provided by syslua input source)
 
 | Function              | Purpose                               |
@@ -245,10 +281,11 @@ sys = {}
 ---@class BuildCtx
 ---@field outputs table<string, string> Output paths
 ---@field fetch_url fun(self: BuildCtx, url: string, sha256: string): string Returns opaque reference to downloaded file
----@field cmd fun(self: BuildCtx, opts: BuildCmdOptions|string): string Returns opaque reference to stdout
+---@field exec fun(self: BuildCtx, opts: ExecOpts|string): string Returns opaque reference to stdout
 
----@class BuildCmdOptions
----@field cmd string Command to execute
+---@class ExecOpts
+---@field bin string Binary/command to execute
+---@field args? string[] Arguments to pass to the command
 ---@field env? table<string,string> Environment variables
 ---@field cwd? string Working directory
 
@@ -258,12 +295,7 @@ sys = {}
 ---@field destroy? fun(inputs: table, ctx: BindCtx): nil Optional: destroy logic for rollback
 
 ---@class BindCtx
----@field cmd fun(self: BindCtx, opts: BindCmdOptions|string): string Returns opaque reference to stdout
-
----@class BindCmdOptions
----@field cmd string Command to execute
----@field env? table<string,string> Environment variables
----@field cwd? string Working directory
+---@field exec fun(self: BindCtx, opts: ExecOpts|string): string Returns opaque reference to stdout
 ```
 
 ### Workspace Configuration
@@ -386,7 +418,7 @@ sys.build({
   apply = function(inputs, ctx)
     -- ctx provides build operations
     local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-    ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+    ctx:exec({ bin = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
     return { out = ctx.out }
   end,
 })

@@ -35,19 +35,23 @@ M.setup = function(opts)
       apply = function(inputs, ctx)
         if opts.source then
           if sys.os == 'windows' then
-            ctx:cmd(string.format('Copy-Item -Recurse -Path "%s" -Destination "%s"', inputs.source, inputs.target))
-          else
-            ctx:cmd({
-              cmd = string.format('cp -r "%s" "%s"', inputs.source, inputs.target),
+            ctx:exec('powershell.exe', {
+              '-NoProfile',
+              '-Command',
+              string.format('Copy-Item -Recurse -Path "%s" -Destination "%s"', inputs.source, inputs.target),
             })
+          else
+            ctx:exec('/bin/sh', { '-c', string.format('cp -r "%s" "%s"', inputs.source, inputs.target) })
           end
         else
           if sys.os == 'windows' then
-            ctx:cmd(string.format('Set-Content -Path "%s" -Value "%s"', inputs.target, inputs.content))
-          else
-            ctx:cmd({
-              cmd = string.format('echo "%s" > "%s"', inputs.content, inputs.target),
+            ctx:exec('powershell.exe', {
+              '-NoProfile',
+              '-Command',
+              string.format('Set-Content -Path "%s" -Value "%s"', inputs.target, inputs.content),
             })
+          else
+            ctx:exec('/bin/sh', { '-c', string.format('echo "%s" > "%s"', inputs.content, inputs.target) })
           end
         end
       end,
@@ -64,15 +68,23 @@ M.setup = function(opts)
       apply = function(inputs, ctx)
         if inputs.source then
           if sys.os == 'windows' then
-            ctx:cmd(string.format('Copy-Item -Recurse -Path "%s" -Destination "%s"', inputs.source, basename))
+            ctx:exec('powershell.exe', {
+              '-NoProfile',
+              '-Command',
+              string.format('Copy-Item -Recurse -Path "%s" -Destination "%s"', inputs.source, basename),
+            })
           else
-            ctx:cmd(string.format('cp -r "%s" "%s"', inputs.source, basename))
+            ctx:exec('/bin/sh', { '-c', string.format('cp -r "%s" "%s"', inputs.source, basename) })
           end
         else
           if sys.os == 'windows' then
-            ctx:cmd(string.format('Set-Content -Path "%s" -Value "%s"', basename, inputs.content))
+            ctx:exec('powershell.exe', {
+              '-NoProfile',
+              '-Command',
+              string.format('Set-Content -Path "%s" -Value "%s"', basename, inputs.content),
+            })
           else
-            ctx:cmd(string.format('echo "%s" > "%s"', inputs.content, basename))
+            ctx:exec('/bin/sh', { '-c', string.format('echo "%s" > "%s"', inputs.content, basename) })
           end
         end
 
@@ -89,22 +101,28 @@ M.setup = function(opts)
       },
       apply = function(inputs, ctx)
         if sys.os == 'windows' then
-          ctx:cmd(
+          ctx:exec('powershell.exe', {
+            '-NoProfile',
+            '-Command',
             string.format(
               'New-Item -ItemType SymbolicLink -Path "%s" -Target "%s"',
               inputs.target,
               inputs.build.outputs.out
-            )
-          )
+            ),
+          })
         else
-          ctx:cmd(string.format('ln -s "%s" "%s"', inputs.build.outputs.out, inputs.target))
+          ctx:exec('/bin/sh', { '-c', string.format('ln -s "%s" "%s"', inputs.build.outputs.out, inputs.target) })
         end
       end,
       destroy = function(_, ctx)
         if sys.os == 'windows' then
-          ctx:cmd(string.format('Remove-Item -Path "%s" -Recurse -Force', opts.target))
+          ctx:exec('powershell.exe', {
+            '-NoProfile',
+            '-Command',
+            string.format('Remove-Item -Path "%s" -Recurse -Force', opts.target),
+          })
         else
-          ctx:cmd(string.format('rm -rf "%s"', opts.target))
+          ctx:exec('/bin/sh', { '-c', string.format('rm -rf "%s"', opts.target) })
         end
       end,
     })

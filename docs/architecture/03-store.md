@@ -193,9 +193,9 @@ Objects in `obj/<hash>/` are made immutable after extraction:
      end,
      apply = function(inputs, ctx)
        local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-       ctx:cmd({ cmd = "mkdir -p " .. ctx.out .. "/bin" })
-       ctx:cmd({ cmd = "cp " .. archive .. " " .. ctx.out .. "/bin/jq" })
-       ctx:cmd({ cmd = "chmod 755 " .. ctx.out .. "/bin/jq" })
+       ctx:exec({ bin = "mkdir -p " .. ctx.out .. "/bin" })
+       ctx:exec({ bin = "cp " .. archive .. " " .. ctx.out .. "/bin/jq" })
+       ctx:exec({ bin = "chmod 755 " .. ctx.out .. "/bin/jq" })
        return { out = ctx.out }
      end,
    })
@@ -203,10 +203,10 @@ Objects in `obj/<hash>/` are made immutable after extraction:
    sys.bind({
      inputs = function() return { build = jq } end,
      apply = function(inputs, ctx)
-       ctx:cmd("ln -sf " .. inputs.build.outputs.out .. "/bin/jq /usr/local/bin/jq")
+       ctx:exec("ln -sf " .. inputs.build.outputs.out .. "/bin/jq /usr/local/bin/jq")
      end,
      destroy = function(inputs, ctx)
-       ctx:cmd("rm /usr/local/bin/jq")
+       ctx:exec("rm /usr/local/bin/jq")
      end,
    })
 ```

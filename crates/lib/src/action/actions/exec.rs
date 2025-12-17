@@ -22,20 +22,20 @@ use crate::execute::types::ExecuteError;
 ///
 /// ```ignore
 /// // Simple command
-/// ctx.cmd("make install");
+/// ctx.exec("make install");
 ///
 /// // With environment and working directory
-/// ctx.cmd(
-///     BuildCmdOptions::new("make")
+/// ctx.exec(
+///     ExecOpts::new("make")
 ///         .with_args(vec!["install".to_string()])
 ///         .with_env(env)
 ///         .with_cwd("/build")
 /// );
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct CmdOpts {
+pub struct ExecOpts {
   /// The command string to execute.
-  pub cmd: String,
+  pub bin: String,
   /// Optional arguments for the command.
   pub args: Option<Vec<String>>,
   /// Optional environment variables to set.
@@ -44,11 +44,11 @@ pub struct CmdOpts {
   pub cwd: Option<String>,
 }
 
-impl CmdOpts {
+impl ExecOpts {
   /// Create a new command with default options.
-  pub fn new(cmd: &str) -> Self {
+  pub fn new(bin: &str) -> Self {
     Self {
-      cmd: cmd.to_string(),
+      bin: bin.to_string(),
       args: None,
       env: None,
       cwd: None,
@@ -74,25 +74,25 @@ impl CmdOpts {
   }
 }
 
-impl From<&str> for CmdOpts {
+impl From<&str> for ExecOpts {
   fn from(cmd: &str) -> Self {
-    CmdOpts::new(cmd)
+    ExecOpts::new(cmd)
   }
 }
 
-pub fn parse_cmd_opts(opts: LuaValue) -> LuaResult<CmdOpts> {
-  match opts {
+pub fn parse_exec_opts(opts: LuaValue, args: Option<LuaValue>) -> LuaResult<ExecOpts> {
+  let mut exec_opts = match opts {
     LuaValue::String(s) => {
       let cmd = s.to_str()?.to_string();
-      Ok(CmdOpts::new(&cmd))
+      Ok(ExecOpts::new(&cmd))
     }
     LuaValue::Table(table) => {
-      let cmd: String = table.get("cmd")?;
+      let bin: String = table.get("bin")?;
       let args: Option<Vec<String>> = table.get("args")?;
       let cwd: Option<String> = table.get("cwd")?;
       let env: Option<LuaTable> = table.get("env")?;
 
-      let mut opts = CmdOpts::new(&cmd);
+      let mut opts = ExecOpts::new(&bin);
 
       let mut args_vec = Vec::new();
       if let Some(a) = args {
@@ -115,7 +115,26 @@ pub fn parse_cmd_opts(opts: LuaValue) -> LuaResult<CmdOpts> {
       Ok(opts)
     }
     _ => Err(LuaError::external("cmd() expects a string or table with 'cmd' field")),
-  }
+  }?;
+  exec_opts = if let Some(args_value) = args {
+    match args_value {
+      LuaValue::Table(table) => {
+        let mut args_vec = Vec::new();
+        for pair in table.pairs::<usize, String>() {
+          let (_index, value) = pair?;
+          args_vec.push(value);
+        }
+        exec_opts.with_args(args_vec)
+      }
+      _ => {
+        return Err(LuaError::external("cmd() 'args' parameter expects a table of strings"));
+      }
+    }
+  } else {
+    exec_opts
+  };
+
+  Ok(exec_opts)
 }
 
 /// Execute a Cmd action.

@@ -129,15 +129,15 @@ mod tests {
   use super::*;
 
   mod bind_def {
-    use crate::{action::actions::cmd::CmdOpts, consts::OBJ_HASH_PREFIX_LEN};
+    use crate::{action::actions::exec::ExecOpts, consts::OBJ_HASH_PREFIX_LEN};
 
     use super::*;
 
     fn simple_def() -> BindDef {
       BindDef {
         inputs: None,
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: "ln -s /src /dest".to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: "ln -s /src /dest".to_string(),
           args: None,
           env: None,
           cwd: None,
@@ -169,8 +169,8 @@ mod tests {
       let def1 = simple_def();
 
       let mut def2 = simple_def();
-      def2.apply_actions.push(Action::Cmd(CmdOpts {
-        cmd: "echo done".to_string(),
+      def2.apply_actions.push(Action::Exec(ExecOpts {
+        bin: "echo done".to_string(),
         args: None,
         env: None,
         cwd: None,
@@ -186,8 +186,8 @@ mod tests {
       let def1 = simple_def();
 
       let mut def2 = simple_def();
-      def2.destroy_actions = Some(vec![Action::Cmd(CmdOpts {
-        cmd: "rm /dest".to_string(),
+      def2.destroy_actions = Some(vec![Action::Exec(ExecOpts {
+        bin: "rm /dest".to_string(),
         args: None,
         env: None,
         cwd: None,
@@ -201,14 +201,14 @@ mod tests {
       let def1 = BindDef {
         inputs: None,
         apply_actions: vec![
-          Action::Cmd(CmdOpts {
-            cmd: "step1".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "step1".to_string(),
             args: None,
             env: None,
             cwd: None,
           }),
-          Action::Cmd(CmdOpts {
-            cmd: "step2".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "step2".to_string(),
             args: None,
             env: None,
             cwd: None,
@@ -221,14 +221,14 @@ mod tests {
       let def2 = BindDef {
         inputs: None,
         apply_actions: vec![
-          Action::Cmd(CmdOpts {
-            cmd: "step2".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "step2".to_string(),
             args: None,
             env: None,
             cwd: None,
           }),
-          Action::Cmd(CmdOpts {
-            cmd: "step1".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "step1".to_string(),
             args: None,
             env: None,
             cwd: None,
@@ -248,15 +248,15 @@ mod tests {
 
       let def = BindDef {
         inputs: Some(BindInputs::String("test".to_string())),
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: "ln -s /src /dest".to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: "ln -s /src /dest".to_string(),
           args: None,
           env: Some(env),
           cwd: Some("/home".to_string()),
         })],
         outputs: Some(BTreeMap::from([("link".to_string(), "$${action:0}".to_string())])),
-        destroy_actions: Some(vec![Action::Cmd(CmdOpts {
-          cmd: "rm /dest".to_string(),
+        destroy_actions: Some(vec![Action::Exec(ExecOpts {
+          bin: "rm /dest".to_string(),
           args: None,
           env: None,
           cwd: None,

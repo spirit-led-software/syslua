@@ -3,7 +3,7 @@ mod cmd;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use cmd::{cmd_apply, cmd_destroy, cmd_info, cmd_plan};
+use cmd::{cmd_apply, cmd_destroy, cmd_info, cmd_init, cmd_plan, cmd_update};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -19,12 +19,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+  /// Initialize a new syslua configuration directory
+  Init {
+    /// Path to the configuration directory
+    path: String,
+  },
   /// Evaluate a config and apply changes to the system
   Apply { file: String },
   /// Evaluate a config and create a plan without applying
   Plan { file: String },
   /// Remove resources defined in a config
   Destroy { file: String },
+  /// Update inputs by re-resolving to latest revisions
+  Update {
+    /// Path to config file (default: ./init.lua or ~/.config/syslua/init.lua)
+    #[arg(value_name = "CONFIG")]
+    config: Option<String>,
+
+    /// Update only specific input(s) (can be repeated)
+    #[arg(short, long = "input", value_name = "NAME")]
+    inputs: Vec<String>,
+
+    /// Show what would change without making changes
+    #[arg(long)]
+    dry_run: bool,
+  },
   /// Display system information
   Info,
 }
@@ -41,12 +60,18 @@ fn main() -> ExitCode {
     .init();
 
   let result = match cli.command {
+    Commands::Init { path } => cmd_init(&path),
     Commands::Apply { file } => cmd_apply(&file),
     Commands::Plan { file } => cmd_plan(&file),
     Commands::Destroy { file } => {
       cmd_destroy(&file);
       Ok(())
     }
+    Commands::Update {
+      config,
+      inputs,
+      dry_run,
+    } => cmd_update(config.as_deref(), inputs, dry_run),
     Commands::Info => {
       cmd_info();
       Ok(())

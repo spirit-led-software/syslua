@@ -218,10 +218,10 @@ User=myapp
 [Install]
 WantedBy=multi-user.target
 ]]
-                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(unit) .. ' > ' .. ctx.out .. '/myapp.service' })
+                ctx:exec({ bin = 'echo ' .. lib.shellQuote(unit) .. ' > ' .. ctx.out .. '/myapp.service' })
             elseif sys.os == "macos" then
                 local plist = generate_launchd_plist(o)
-                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(plist) .. ' > ' .. ctx.out .. '/myapp.plist' })
+                ctx:exec({ bin = 'echo ' .. lib.shellQuote(plist) .. ' > ' .. ctx.out .. '/myapp.plist' })
             end
             return { out = ctx.out }
         end,
@@ -232,16 +232,16 @@ WantedBy=multi-user.target
         inputs = function() return { build = service_build } end,
         apply = function(o, ctx)
             if sys.os == "linux" then
-                ctx:cmd('ln -sf ' .. o.build.outputs.out .. '/myapp.service /etc/systemd/system/myapp.service && systemctl daemon-reload && systemctl enable --now myapp')
+                ctx:exec('ln -sf ' .. o.build.outputs.out .. '/myapp.service /etc/systemd/system/myapp.service && systemctl daemon-reload && systemctl enable --now myapp')
             elseif sys.os == "macos" then
-                ctx:cmd('ln -sf ' .. o.build.outputs.out .. '/myapp.plist ~/Library/LaunchAgents/myapp.plist && launchctl load ~/Library/LaunchAgents/myapp.plist')
+                ctx:exec('ln -sf ' .. o.build.outputs.out .. '/myapp.plist ~/Library/LaunchAgents/myapp.plist && launchctl load ~/Library/LaunchAgents/myapp.plist')
             end
         end,
         destroy = function(o, ctx)
             if sys.os == "linux" then
-                ctx:cmd('systemctl disable --now myapp && rm /etc/systemd/system/myapp.service && systemctl daemon-reload')
+                ctx:exec('systemctl disable --now myapp && rm /etc/systemd/system/myapp.service && systemctl daemon-reload')
             elseif sys.os == "macos" then
-                ctx:cmd('launchctl unload ~/Library/LaunchAgents/myapp.plist && rm ~/Library/LaunchAgents/myapp.plist')
+                ctx:exec('launchctl unload ~/Library/LaunchAgents/myapp.plist && rm ~/Library/LaunchAgents/myapp.plist')
             end
         end,
     })
@@ -334,7 +334,7 @@ sys.build({
     end,
     apply = function(o, ctx)
         local archive = ctx:fetch_url(o.url, o.sha256)
-        ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+        ctx:exec({ bin = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
         return { out = ctx.out }
     end,
 })
@@ -353,13 +353,13 @@ sys.build({
     end,
     apply = function(o, ctx)
         local src = ctx:fetch_git(o.git_url, o.rev, o.sha256)
-        ctx:cmd({
+        ctx:exec({
             cmd = 'cargo build --release',
             cwd = src,
             env = { PATH = o.rust.outputs.out .. '/bin:' .. os.getenv('PATH') },
         })
-        ctx:cmd({ cmd = 'mkdir -p ' .. ctx.out .. '/bin' })
-        ctx:cmd({ cmd = 'cp ' .. src .. '/target/release/custom-tool ' .. ctx.out .. '/bin/custom-tool' })
+        ctx:exec({ bin = 'mkdir -p ' .. ctx.out .. '/bin' })
+        ctx:exec({ bin = 'cp ' .. src .. '/target/release/custom-tool ' .. ctx.out .. '/bin/custom-tool' })
         return { out = ctx.out }
     end,
 })

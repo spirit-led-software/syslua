@@ -1,7 +1,7 @@
 //! Lua bindings for `sys.build{}`.
 //!
 //! This module provides:
-//! - `BuildCtx` as LuaUserData with methods like `fetch_url` and `cmd`
+//! - `BuildCtx` as LuaUserData with methods like `fetch_url` and `exec`
 //! - `register_sys_build()` to register the `sys.build` function
 //! - Helper functions for converting between Lua values and Rust types
 
@@ -324,7 +324,7 @@ mod tests {
                     name = "test-pkg",
                     version = "1.0.0",
                     apply = function(inputs, ctx)
-                        ctx:cmd("make install")
+                        ctx:exec("make install")
                         return { out = "/path/to/output" }
                     end,
                 })
@@ -374,7 +374,7 @@ mod tests {
                     inputs = { url = "https://example.com/src.tar.gz", sha256 = "abc123" },
                     apply = function(inputs, ctx)
                         local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-                        ctx:cmd("tar -xzf " .. archive)
+                        ctx:exec("tar -xzf " .. archive)
                         return { out = "/build/output" }
                     end,
                 })
@@ -415,7 +415,7 @@ mod tests {
                         return { computed = "value" }
                     end,
                     apply = function(inputs, ctx)
-                        ctx:cmd("echo " .. inputs.computed)
+                        ctx:exec("echo " .. inputs.computed)
                         return { out = "/output" }
                     end,
                 })
@@ -446,7 +446,7 @@ mod tests {
                 local dep = sys.build({
                     name = "dependency",
                     apply = function(inputs, ctx)
-                        ctx:cmd("make dep")
+                        ctx:exec("make dep")
                         return { out = "/dep/output" }
                     end,
                 })
@@ -455,7 +455,7 @@ mod tests {
                     name = "consumer",
                     inputs = { dep = dep },
                     apply = function(inputs, ctx)
-                        ctx:cmd("make -I " .. inputs.dep.outputs.out)
+                        ctx:exec("make -I " .. inputs.dep.outputs.out)
                         return { out = "/consumer/output" }
                     end,
                 })
@@ -592,9 +592,9 @@ mod tests {
       lua
         .load(
           r#"
-                sys.build({ name = "pkg1", apply = function(i, c) c:cmd("a"); return { out = "x" } end })
-                sys.build({ name = "pkg2", apply = function(i, c) c:cmd("b"); return { out = "y" } end })
-                sys.build({ name = "pkg3", apply = function(i, c) c:cmd("c"); return { out = "z" } end })
+                sys.build({ name = "pkg1", apply = function(i, c) c:exec("a"); return { out = "x" } end })
+                sys.build({ name = "pkg2", apply = function(i, c) c:exec("b"); return { out = "y" } end })
+                sys.build({ name = "pkg3", apply = function(i, c) c:exec("c"); return { out = "z" } end })
             "#,
         )
         .exec()?;
@@ -623,7 +623,7 @@ mod tests {
                     version = "1.0.0",
                     inputs = { key = "value" },
                     apply = function(inputs, ctx)
-                        ctx:cmd("make")
+                        ctx:exec("make")
                         return { out = "/output" }
                     end,
                 })
@@ -652,7 +652,7 @@ mod tests {
                     name = "same-pkg",
                     version = "1.0.0",
                     apply = function(inputs, ctx)
-                        ctx:cmd("make")
+                        ctx:exec("make")
                         return { out = "/output" }
                     end,
                 })
@@ -660,7 +660,7 @@ mod tests {
                     name = "same-pkg",
                     version = "1.0.0",
                     apply = function(inputs, ctx)
-                        ctx:cmd("make")
+                        ctx:exec("make")
                         return { out = "/output" }
                     end,
                 })
@@ -715,7 +715,7 @@ mod tests {
                 return sys.build({
                     name = "no-inputs",
                     apply = function(inputs, ctx)
-                        ctx:cmd("make")
+                        ctx:exec("make")
                         return { out = "/output" }
                     end,
                 })
@@ -742,7 +742,7 @@ mod tests {
                     name = "test-out",
                     apply = function(inputs, ctx)
                         -- ctx.out should return $${out} placeholder
-                        ctx:cmd("mkdir -p " .. ctx.out .. "/bin")
+                        ctx:exec("mkdir -p " .. ctx.out .. "/bin")
                         return { out = ctx.out }
                     end,
                 })
@@ -772,8 +772,8 @@ mod tests {
                 sys.build({
                     name = "uses-out",
                     apply = function(inputs, ctx)
-                        ctx:cmd("mkdir -p " .. ctx.out .. "/bin")
-                        ctx:cmd("cp binary " .. ctx.out .. "/bin/")
+                        ctx:exec("mkdir -p " .. ctx.out .. "/bin")
+                        ctx:exec("cp binary " .. ctx.out .. "/bin/")
                         return { out = ctx.out }
                     end,
                 })
@@ -788,25 +788,25 @@ mod tests {
       assert_eq!(build_def.apply_actions.len(), 2);
 
       match &build_def.apply_actions[0] {
-        Action::Cmd(opts) => {
+        Action::Exec(opts) => {
           assert!(
-            opts.cmd.contains("$${out}"),
+            opts.bin.contains("$${out}"),
             "cmd should contain ${{out}} placeholder: {}",
-            opts.cmd
+            opts.bin
           );
-          assert_eq!(opts.cmd, "mkdir -p $${out}/bin");
+          assert_eq!(opts.bin, "mkdir -p $${out}/bin");
         }
         _ => panic!("expected Cmd action"),
       }
 
       match &build_def.apply_actions[1] {
-        Action::Cmd(opts) => {
+        Action::Exec(opts) => {
           assert!(
-            opts.cmd.contains("$${out}"),
+            opts.bin.contains("$${out}"),
             "cmd should contain ${{out}} placeholder: {}",
-            opts.cmd
+            opts.bin
           );
-          assert_eq!(opts.cmd, "cp binary $${out}/bin/");
+          assert_eq!(opts.bin, "cp binary $${out}/bin/");
         }
         _ => panic!("expected Cmd action"),
       }
@@ -823,7 +823,7 @@ mod tests {
           r#"
                 local link = sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                     end,
                 })
 
@@ -831,7 +831,7 @@ mod tests {
                     name = "invalid-build",
                     inputs = { bind_dep = link },
                     apply = function(inputs, ctx)
-                        ctx:cmd("make")
+                        ctx:exec("make")
                         return { out = "/output" }
                     end,
                 })
@@ -860,7 +860,7 @@ mod tests {
           r#"
                 local link = sys.bind({
                     apply = function(inputs, ctx)
-                        ctx:cmd("ln -sf /src /dest")
+                        ctx:exec("ln -sf /src /dest")
                     end,
                 })
 
@@ -872,7 +872,7 @@ mod tests {
                         }
                     },
                     apply = function(inputs, ctx)
-                        ctx:cmd("make")
+                        ctx:exec("make")
                         return { out = "/output" }
                     end,
                 })

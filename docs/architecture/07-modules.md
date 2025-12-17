@@ -73,7 +73,7 @@ function M.setup(opts)
         name = "nginx-config",
         inputs = function() return opts end,
         apply = function(o, ctx)
-            ctx:cmd({
+            ctx:exec({
                 cmd = 'echo "worker_processes ' .. o.workers .. ';" > ' .. ctx.out .. '/nginx.conf'
             })
             return { out = ctx.out }
@@ -83,10 +83,10 @@ function M.setup(opts)
     sys.bind({
         inputs = function() return { build = config_build } end,
         apply = function(o, ctx)
-            ctx:cmd('ln -sf ' .. o.build.outputs.out .. '/nginx.conf /etc/nginx/nginx.conf')
+            ctx:exec('ln -sf ' .. o.build.outputs.out .. '/nginx.conf /etc/nginx/nginx.conf')
         end,
         destroy = function(o, ctx)
-            ctx:cmd('rm /etc/nginx/nginx.conf')
+            ctx:exec('rm /etc/nginx/nginx.conf')
         end,
     })
     
@@ -130,7 +130,7 @@ function M.setup(opts)
         end,
         apply = function(o, ctx)
             local archive = ctx:fetch_url(o.url, o.sha256)
-            ctx:cmd({ cmd = "tar -xzf " .. archive .. " -C " .. ctx.out })
+            ctx:exec({ bin = "tar -xzf " .. archive .. " -C " .. ctx.out })
             return { out = ctx.out }
         end,
     })
@@ -138,10 +138,10 @@ function M.setup(opts)
     sys.bind({
         inputs = function() return { build = build } end,
         apply = function(o, ctx)
-            ctx:cmd("ln -sf " .. o.build.outputs.out .. "/bin/rg /usr/local/bin/rg")
+            ctx:exec("ln -sf " .. o.build.outputs.out .. "/bin/rg /usr/local/bin/rg")
         end,
         destroy = function(o, ctx)
-            ctx:cmd("rm /usr/local/bin/rg")
+            ctx:exec("rm /usr/local/bin/rg")
         end,
     })
     
@@ -178,7 +178,7 @@ http {
     server { listen %d; }
 }
 ]], o.workers, o.port)
-            ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(conf) .. ' > ' .. ctx.out .. '/nginx.conf' })
+            ctx:exec({ bin = 'echo ' .. lib.shellQuote(conf) .. ' > ' .. ctx.out .. '/nginx.conf' })
             return { out = ctx.out }
         end,
     })
@@ -196,10 +196,10 @@ ExecStart=/usr/sbin/nginx -c ]] .. o.config_path.outputs.out .. [[/nginx.conf
 [Install]
 WantedBy=multi-user.target
 ]]
-                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(unit) .. ' > ' .. ctx.out .. '/nginx.service' })
+                ctx:exec({ bin = 'echo ' .. lib.shellQuote(unit) .. ' > ' .. ctx.out .. '/nginx.service' })
             elseif sys.os == "macos" then
                 local plist = generate_launchd_plist(o)
-                ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(plist) .. ' > ' .. ctx.out .. '/nginx.plist' })
+                ctx:exec({ bin = 'echo ' .. lib.shellQuote(plist) .. ' > ' .. ctx.out .. '/nginx.plist' })
             end
             return { out = ctx.out }
         end,
@@ -208,20 +208,20 @@ WantedBy=multi-user.target
     sys.bind({
         inputs = function() return { config = config_build, service = service_build } end,
         apply = function(o, ctx)
-            ctx:cmd('ln -sf ' .. o.config.outputs.out .. '/nginx.conf /etc/nginx/nginx.conf')
+            ctx:exec('ln -sf ' .. o.config.outputs.out .. '/nginx.conf /etc/nginx/nginx.conf')
             if sys.os == "linux" then
-                ctx:cmd('ln -sf ' .. o.service.outputs.out .. '/nginx.service /etc/systemd/system/nginx.service && systemctl daemon-reload && systemctl enable --now nginx')
+                ctx:exec('ln -sf ' .. o.service.outputs.out .. '/nginx.service /etc/systemd/system/nginx.service && systemctl daemon-reload && systemctl enable --now nginx')
             elseif sys.os == "macos" then
-                ctx:cmd('ln -sf ' .. o.service.outputs.out .. '/nginx.plist ~/Library/LaunchAgents/nginx.plist && launchctl load ~/Library/LaunchAgents/nginx.plist')
+                ctx:exec('ln -sf ' .. o.service.outputs.out .. '/nginx.plist ~/Library/LaunchAgents/nginx.plist && launchctl load ~/Library/LaunchAgents/nginx.plist')
             end
         end,
         destroy = function(o, ctx)
             if sys.os == "linux" then
-                ctx:cmd('systemctl disable --now nginx && rm /etc/systemd/system/nginx.service && systemctl daemon-reload')
+                ctx:exec('systemctl disable --now nginx && rm /etc/systemd/system/nginx.service && systemctl daemon-reload')
             elseif sys.os == "macos" then
-                ctx:cmd('launchctl unload ~/Library/LaunchAgents/nginx.plist && rm ~/Library/LaunchAgents/nginx.plist')
+                ctx:exec('launchctl unload ~/Library/LaunchAgents/nginx.plist && rm ~/Library/LaunchAgents/nginx.plist')
             end
-            ctx:cmd('rm /etc/nginx/nginx.conf')
+            ctx:exec('rm /etc/nginx/nginx.conf')
         end,
     })
     
@@ -259,7 +259,7 @@ function M.setup(opts)
         end,
         apply = function(o, ctx)
             local archive = ctx:fetch_url(o.url, o.sha256)
-            ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+            ctx:exec({ bin = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
             return { out = ctx.out }
         end,
     })
@@ -268,7 +268,7 @@ function M.setup(opts)
         name = "vscode-settings",
         inputs = function() return { settings = opts.settings } end,
         apply = function(o, ctx)
-            ctx:cmd({ cmd = 'echo ' .. lib.shellQuote(lib.toJSON(o.settings)) .. ' > ' .. ctx.out .. '/settings.json' })
+            ctx:exec({ bin = 'echo ' .. lib.shellQuote(lib.toJSON(o.settings)) .. ' > ' .. ctx.out .. '/settings.json' })
             return { out = ctx.out }
         end,
     })
@@ -277,21 +277,21 @@ function M.setup(opts)
         inputs = function() return { vscode = vscode_build, settings = settings_build, extensions = opts.extensions } end,
         apply = function(o, ctx)
             -- Add to PATH
-            ctx:cmd('ln -sf ' .. o.vscode.outputs.out .. '/bin/code /usr/local/bin/code')
+            ctx:exec('ln -sf ' .. o.vscode.outputs.out .. '/bin/code /usr/local/bin/code')
             -- Symlink settings
-            ctx:cmd('mkdir -p ~/.config/Code/User && ln -sf ' .. o.settings.outputs.out .. '/settings.json ~/.config/Code/User/settings.json')
+            ctx:exec('mkdir -p ~/.config/Code/User && ln -sf ' .. o.settings.outputs.out .. '/settings.json ~/.config/Code/User/settings.json')
             -- Install extensions
             for _, ext in ipairs(o.extensions) do
-                ctx:cmd('code --install-extension ' .. ext)
+                ctx:exec('code --install-extension ' .. ext)
             end
         end,
         destroy = function(o, ctx)
             -- Uninstall extensions (in reverse)
             for i = #o.extensions, 1, -1 do
-                ctx:cmd('code --uninstall-extension ' .. o.extensions[i])
+                ctx:exec('code --uninstall-extension ' .. o.extensions[i])
             end
-            ctx:cmd('rm ~/.config/Code/User/settings.json')
-            ctx:cmd('rm /usr/local/bin/code')
+            ctx:exec('rm ~/.config/Code/User/settings.json')
+            ctx:exec('rm /usr/local/bin/code')
         end,
     })
     

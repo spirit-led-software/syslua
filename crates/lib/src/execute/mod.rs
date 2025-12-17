@@ -591,7 +591,7 @@ pub async fn execute_single_build(
 mod tests {
   use super::*;
   use crate::{
-    action::{Action, actions::cmd::CmdOpts},
+    action::{Action, actions::exec::ExecOpts},
     bind::BindInputs,
     build::{BuildDef, BuildInputs},
     util::{
@@ -609,8 +609,8 @@ mod tests {
       name: name.to_string(),
       version: None,
       inputs,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
@@ -786,8 +786,8 @@ mod tests {
         name: "failing".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: cmd.to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: cmd.to_string(),
           args: Some(args),
           env: None,
           cwd: None,
@@ -819,8 +819,8 @@ mod tests {
         name: "a".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: cmd.to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: cmd.to_string(),
           args: Some(args),
           env: None,
           cwd: None,
@@ -898,8 +898,8 @@ mod tests {
     let (cmd, args) = shell_cmd(script);
     BindDef {
       inputs,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
@@ -976,8 +976,8 @@ mod tests {
         name: "provider".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: echo_cmd.to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: echo_cmd.to_string(),
           args: Some(echo_args),
           env: None,
           cwd: None,
@@ -991,8 +991,8 @@ mod tests {
       let (bind_cmd, bind_args) = shell_cmd(&format!("echo using $$${{build:{}:bin}}", build_hash.0));
       let bind = BindDef {
         inputs: Some(BindInputs::Build(build_hash.clone())),
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: bind_cmd.to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: bind_cmd.to_string(),
           args: Some(bind_args),
           env: None,
           cwd: None,
@@ -1044,15 +1044,15 @@ mod tests {
       // Use platform-specific commands since PATH is isolated
       let bind_a = BindDef {
         inputs: None,
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: touch_cmd_str,
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: touch_cmd_str,
           args: Some(touch_args),
           env: None,
           cwd: None,
         })],
         outputs: None,
-        destroy_actions: Some(vec![Action::Cmd(CmdOpts {
-          cmd: rm_cmd_str,
+        destroy_actions: Some(vec![Action::Exec(ExecOpts {
+          bin: rm_cmd_str,
           args: Some(rm_args),
           env: None,
           cwd: None,
@@ -1064,8 +1064,8 @@ mod tests {
       let (exit_cmd, exit_args) = shell_cmd("exit 1");
       let bind_b = BindDef {
         inputs: Some(BindInputs::Bind(hash_a.clone())),
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: exit_cmd.to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: exit_cmd.to_string(),
           args: Some(exit_args),
           env: None,
           cwd: None,
@@ -1122,8 +1122,8 @@ mod tests {
         name: "failing-build".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: "exit 1".to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: "exit 1".to_string(),
           args: None,
           env: None,
           cwd: None,

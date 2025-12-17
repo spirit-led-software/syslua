@@ -43,12 +43,12 @@ sys.bind({
     return { ... }  -- Any data needed by apply/destroy functions
   end,
   apply = function(inputs, ctx)
-    ctx:cmd({
+    ctx:exec({
       cmd = "...",
     })
   end,
   destroy = function(inputs, ctx)  -- Optional: for rollback support
-    ctx:cmd({
+    ctx:exec({
       cmd = "...",
     })
   end,
@@ -63,30 +63,30 @@ The bind context provides a single, flexible action for executing system modific
 ---@class BindCtx
 
 -- Execute a command, returns an opaque reference to stdout
----@field cmd fun(opts: BindCmdOptions): string
+---@field exec fun(opts: ExecOpts): string
 ```
 
-### The `cmd` Action
+### The `exec` Action
 
-The `cmd` action is the sole mechanism for executing operations during a bind. The `apply` function runs commands to create state, and the optional `destroy` function runs commands to reverse it:
+The `exec` action is the sole mechanism for executing operations during a bind. The `apply` function runs commands to create state, and the optional `destroy` function runs commands to reverse it:
 
 ```lua
 -- Simple command (string)
-ctx:cmd("ln -s /src /dest")
+ctx:exec("ln -s /src /dest")
 
 -- Command with environment and working directory
-ctx:cmd({
-  cmd = "npm install -g some-package",
+ctx:exec({
+  bin = "npm install -g some-package",
   env = { HOME = os.getenv("HOME") },
   cwd = "/some/path",
 })
 ```
 
-**BindCmdOptions:**
+**ExecOpts:**
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `cmd` | string | Required: the shell command to execute |
+| `bin` | string | Required: the shell command to execute |
 | `cwd` | string? | Optional: working directory for the command |
 | `env` | table<string,string>? | Optional: environment variables for the command |
 
@@ -145,17 +145,10 @@ pub struct BindCtx {
 impl BindCtx {
     /// Execute a command, returns an opaque reference
     /// that resolves to stdout at execution time
-    pub fn cmd(&mut self, opts: impl Into<BindCmdOptions>) -> String;
+    pub fn exec(&mut self, opts: impl Into<ExecOpts>) -> String;
     
     /// Consume context and return accumulated actions
     pub fn into_actions(self) -> Vec<BindAction>;
-}
-
-/// Command options for bind actions
-pub struct BindCmdOptions {
-    pub cmd: String,
-    pub env: Option<BTreeMap<String, String>>,
-    pub cwd: Option<String>,
 }
 ```
 
@@ -163,18 +156,18 @@ Note: `BindRef` is not a separate Rust struct - it's a Lua table with a metatabl
 
 ### Placeholder System
 
-The `cmd` method returns an opaque string that can be stored and used later. This allows destroy actions to reference values captured during apply:
+The `exec` method returns an opaque string that can be stored and used later. This allows destroy actions to reference values captured during apply:
 
 ```lua
 apply = function(inputs, ctx)
   -- cmd returns an opaque reference to the command's stdout
-  local container_id = ctx:cmd("docker run -d postgres")
+  local container_id = ctx:exec("docker run -d postgres")
   -- Return it as an output so destroy can access it
   return { container = container_id }
 end,
 destroy = function(inputs, ctx)
   -- inputs.container resolves to the actual container ID at runtime
-  ctx:cmd("docker stop " .. inputs.container)
+  ctx:exec("docker stop " .. inputs.container)
 end
 ```
 
@@ -200,7 +193,7 @@ local rg_build = sys.build({
   version = '15.1.0',
   apply = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-    ctx:cmd({ cmd = 'tar -xzf ' .. archive .. ' -C /build/out' })
+    ctx:exec({ bin = 'tar -xzf ' .. archive .. ' -C /build/out' })
   end,
 })
 
@@ -229,17 +222,17 @@ Internally creates:
 local file_build = sys.build({
   name = 'file-gitconfig',
   apply = function(inputs, ctx)
-    ctx:cmd({ cmd = 'cp ' .. inputs.source .. ' /build/out/content' })
+    ctx:exec({ bin = 'cp ' .. inputs.source .. ' /build/out/content' })
   end,
 })
 
 sys.bind({
   inputs = { build = file_build, target = '~/.gitconfig' },
   apply = function(inputs, ctx)
-    ctx:cmd('ln -sf ' .. inputs.build.outputs.out .. '/content ' .. inputs.target)
+    ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/content ' .. inputs.target)
   end,
   destroy = function(inputs, ctx)
-    ctx:cmd('rm ' .. inputs.target)
+    ctx:exec('rm ' .. inputs.target)
   end,
 })
 ```
@@ -266,10 +259,10 @@ sys.bind({
   end,
   apply = function(inputs, ctx)
     -- Create symlink to bin directory
-    ctx:cmd('ln -sf ' .. inputs.build.outputs.out .. '/bin/rg /usr/local/bin/rg')
+    ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/bin/rg /usr/local/bin/rg')
   end,
   destroy = function(inputs, ctx)
-    ctx:cmd('rm /usr/local/bin/rg')
+    ctx:exec('rm /usr/local/bin/rg')
   end,
 })
 ```
@@ -285,10 +278,10 @@ sys.bind({
     return { build = my_tool }
   end,
   apply = function(inputs, ctx)
-    ctx:cmd('ln -sf ' .. inputs.build.outputs.out .. '/bin/mytool /usr/local/bin/mytool')
+    ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/bin/mytool /usr/local/bin/mytool')
   end,
   destroy = function(inputs, ctx)
-    ctx:cmd('rm /usr/local/bin/mytool')
+    ctx:exec('rm /usr/local/bin/mytool')
   end,
 })
 
@@ -298,12 +291,12 @@ sys.bind({
     return { build = my_tool }
   end,
   apply = function(inputs, ctx)
-    ctx:cmd('ln -sf ' .. inputs.build.outputs.out .. '/share/man/man1/mytool.1 ~/.local/share/man/man1/mytool.1')
-    ctx:cmd('ln -sf ' .. inputs.build.outputs.out .. '/completions/_mytool ~/.zsh/completions/_mytool')
+    ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/share/man/man1/mytool.1 ~/.local/share/man/man1/mytool.1')
+    ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/completions/_mytool ~/.zsh/completions/_mytool')
   end,
   destroy = function(inputs, ctx)
-    ctx:cmd('rm ~/.local/share/man/man1/mytool.1')
-    ctx:cmd('rm ~/.zsh/completions/_mytool')
+    ctx:exec('rm ~/.local/share/man/man1/mytool.1')
+    ctx:exec('rm ~/.zsh/completions/_mytool')
   end,
 })
 ```
@@ -316,17 +309,17 @@ sys.bind({
     return { build = neovim_build }
   end,
   apply = function(inputs, ctx)
-    ctx:cmd('ln -sf ' .. inputs.build.outputs.out .. '/bin/nvim /usr/local/bin/nvim')
+    ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/bin/nvim /usr/local/bin/nvim')
 
     if sys.os == 'darwin' then
-      ctx:cmd('ln -sf ' .. inputs.build.outputs.out .. '/Applications/Neovim.app ~/Applications/Neovim.app')
+      ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/Applications/Neovim.app ~/Applications/Neovim.app')
     end
   end,
   destroy = function(inputs, ctx)
-    ctx:cmd('rm /usr/local/bin/nvim')
+    ctx:exec('rm /usr/local/bin/nvim')
 
     if sys.os == 'darwin' then
-      ctx:cmd('rm ~/Applications/Neovim.app')
+      ctx:exec('rm ~/Applications/Neovim.app')
     end
   end,
 })
@@ -338,14 +331,14 @@ sys.bind({
 sys.bind({
   apply = function(inputs, ctx)
     if sys.os == 'darwin' then
-      ctx:cmd('defaults write com.apple.finder AppleShowAllFiles -bool true')
-      ctx:cmd('killall Finder')
+      ctx:exec('defaults write com.apple.finder AppleShowAllFiles -bool true')
+      ctx:exec('killall Finder')
     end
   end,
   destroy = function(inputs, ctx)
     if sys.os == 'darwin' then
-      ctx:cmd('defaults write com.apple.finder AppleShowAllFiles -bool false')
-      ctx:cmd('killall Finder')
+      ctx:exec('defaults write com.apple.finder AppleShowAllFiles -bool false')
+      ctx:exec('killall Finder')
     end
   end,
 })
@@ -360,20 +353,20 @@ sys.bind({
   end,
   apply = function(inputs, ctx)
     if sys.os == 'linux' then
-      ctx:cmd('ln -sf ' .. inputs.service_build.outputs.out .. '/nginx.service /etc/systemd/system/nginx.service')
-      ctx:cmd('systemctl daemon-reload && systemctl enable nginx && systemctl start nginx')
+      ctx:exec('ln -sf ' .. inputs.service_build.outputs.out .. '/nginx.service /etc/systemd/system/nginx.service')
+      ctx:exec('systemctl daemon-reload && systemctl enable nginx && systemctl start nginx')
     elseif sys.os == 'darwin' then
-      ctx:cmd('ln -sf ' .. inputs.service_build.outputs.out .. '/nginx.plist ~/Library/LaunchAgents/nginx.plist')
-      ctx:cmd('launchctl load ~/Library/LaunchAgents/nginx.plist')
+      ctx:exec('ln -sf ' .. inputs.service_build.outputs.out .. '/nginx.plist ~/Library/LaunchAgents/nginx.plist')
+      ctx:exec('launchctl load ~/Library/LaunchAgents/nginx.plist')
     end
   end,
   destroy = function(inputs, ctx)
     if sys.os == 'linux' then
-      ctx:cmd('systemctl stop nginx && systemctl disable nginx')
-      ctx:cmd('rm /etc/systemd/system/nginx.service')
+      ctx:exec('systemctl stop nginx && systemctl disable nginx')
+      ctx:exec('rm /etc/systemd/system/nginx.service')
     elseif sys.os == 'darwin' then
-      ctx:cmd('launchctl unload ~/Library/LaunchAgents/nginx.plist')
-      ctx:cmd('rm ~/Library/LaunchAgents/nginx.plist')
+      ctx:exec('launchctl unload ~/Library/LaunchAgents/nginx.plist')
+      ctx:exec('rm ~/Library/LaunchAgents/nginx.plist')
     end
   end,
 })
@@ -406,7 +399,7 @@ pub struct Manifest {
    - Same builds, different binds = only deployment changed
    - Different builds, same binds = content changed
 3. **GC-safe**: Builds referenced by any snapshot are protected from garbage collection
-4. **Future-proof**: New bind patterns slot in naturally via `cmd`
+4. **Future-proof**: New bind patterns slot in naturally via `exec`
 
 ## Rollback with `destroy_actions`
 

@@ -65,7 +65,22 @@ There are two ways to access input content, depending on whether the input has a
 
 ### Inputs with `init.lua` (Requireable)
 
-If an input has a top-level `init.lua`, it becomes a Lua module that can be `require()`'d using the input name as the namespace:
+If an input has a top-level `init.lua`, it becomes a Lua module that can be `require()`'d using the input name as the namespace. The input searcher handles:
+
+- **Exact match**: `require("input_name")` → loads `input_path/init.lua`
+- **Submodules**: `require("input_name.utils")` → loads `input_path/utils.lua`
+- **Nested submodules**: `require("input_name.sub.module")` → loads `input_path/sub/module.lua` or `input_path/sub/module/init.lua`
+- **LuaRocks-style**: `require("input_name.utils")` → also checks `input_path/lua/utils.lua` or `input_path/lua/utils/init.lua`
+
+The search order for submodules is:
+1. `input_path/<module>.lua`
+2. `input_path/<module>/init.lua`
+3. `input_path/lua/<module>.lua` (LuaRocks-style)
+4. `input_path/lua/<module>/init.lua` (LuaRocks-style)
+
+This allows libraries with a `lua/` subdirectory (common in LuaRocks packages) to work seamlessly.
+
+All files loaded from inputs have `__dir` injected, just like any other Lua file. This means relative `require()` and `dofile()` calls within inputs work correctly.
 
 ```lua
 M.inputs = {
@@ -301,9 +316,22 @@ FETCH_INPUT(name, url, rev):
 
     // Register as Lua module if init.lua exists
     IF FILE_EXISTS(cache_path + "/init.lua"):
-        REGISTER_LUA_PATH(name, cache_path)
+        REGISTER_INPUT_SEARCHER(name, cache_path)
 
     RETURN { path: cache_path, rev: rev }
+
+REGISTER_INPUT_SEARCHER(name, cache_path):
+    // A custom package.searchers entry is added that:
+    // 1. Maps require("name") → cache_path/init.lua
+    // 2. Maps require("name.sub.module") to (in order):
+    //    - cache_path/sub/module.lua
+    //    - cache_path/sub/module/init.lua
+    //    - cache_path/lua/sub/module.lua       (LuaRocks-style)
+    //    - cache_path/lua/sub/module/init.lua  (LuaRocks-style)
+    // 3. Uses load_file_with_dir() for __dir injection
+    //
+    // The searcher is inserted at position 2 in package.searchers,
+    // before the standard file searcher, so input names take precedence.
 ```
 
 ### Lock File Validation Rules

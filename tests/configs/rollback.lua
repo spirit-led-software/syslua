@@ -48,11 +48,22 @@
 ---   1. Initial apply creates file_a.txt and file_b.txt
 ---   2. Failure apply destroys file_a.txt, fails on C, restores file_a.txt
 ---   3. Success apply removes file_a.txt, creates file_c.txt
----
+
 local TEST_DIR = '/tmp/syslua-rollback-test'
 
--- Standard PATH for commands (needed because syslua isolates the environment)
-local STANDARD_PATH = '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+--- Execute a shell command (cross-platform)
+--- @param ctx ActionCtx
+--- @param script string
+--- @return string
+local function sh(ctx, script)
+  if package.config:sub(1, 1) == '\\' then
+    -- Windows: use cmd.exe
+    return ctx:exec({ bin = 'cmd.exe', args = { '/c', script } })
+  else
+    -- Unix: use /bin/sh
+    return ctx:exec({ bin = '/bin/sh', args = { '-c', script } })
+  end
+end
 
 -- Get phase from environment, default to "initial"
 local phase = os.getenv('ROLLBACK_PHASE') or 'initial'
@@ -66,15 +77,12 @@ return {
       sys.bind({
         outputs = { file = TEST_DIR .. '/file_a.txt' },
         apply = function(_, ctx)
-          ctx:cmd({ cmd = 'mkdir -p ' .. TEST_DIR, env = { PATH = STANDARD_PATH } })
-          ctx:cmd({
-            cmd = 'echo "Content A - created at $(date)" > ' .. TEST_DIR .. '/file_a.txt',
-            env = { PATH = STANDARD_PATH },
-          })
+          sh(ctx, 'mkdir -p ' .. TEST_DIR)
+          sh(ctx, 'echo "Content A - created at $(date)" > ' .. TEST_DIR .. '/file_a.txt')
           return { file = TEST_DIR .. '/file_a.txt' }
         end,
         destroy = function(outputs, ctx)
-          ctx:cmd({ cmd = 'rm -f ' .. outputs.file, env = { PATH = STANDARD_PATH } })
+          sh(ctx, 'rm -f ' .. outputs.file)
         end,
       })
     end
@@ -84,15 +92,12 @@ return {
     sys.bind({
       outputs = { file = TEST_DIR .. '/file_b.txt' },
       apply = function(_, ctx)
-        ctx:cmd({ cmd = 'mkdir -p ' .. TEST_DIR, env = { PATH = STANDARD_PATH } })
-        ctx:cmd({
-          cmd = 'echo "Content B - created at $(date)" > ' .. TEST_DIR .. '/file_b.txt',
-          env = { PATH = STANDARD_PATH },
-        })
+        sh(ctx, 'mkdir -p ' .. TEST_DIR)
+        sh(ctx, 'echo "Content B - created at $(date)" > ' .. TEST_DIR .. '/file_b.txt')
         return { file = TEST_DIR .. '/file_b.txt' }
       end,
       destroy = function(outputs, ctx)
-        ctx:cmd({ cmd = 'rm -f ' .. outputs.file, env = { PATH = STANDARD_PATH } })
+        sh(ctx, 'rm -f ' .. outputs.file)
       end,
     })
 
@@ -103,28 +108,25 @@ return {
       sys.bind({
         outputs = { file = TEST_DIR .. '/file_c.txt' },
         apply = function(_, ctx)
-          ctx:cmd({ cmd = 'mkdir -p ' .. TEST_DIR, env = { PATH = STANDARD_PATH } })
+          sh(ctx, 'mkdir -p ' .. TEST_DIR)
           -- This command will fail with exit code 1
-          ctx:cmd({ cmd = 'echo "About to fail..." && exit 1', env = { PATH = STANDARD_PATH } })
+          sh(ctx, 'echo "About to fail..." && exit 1')
           return { file = TEST_DIR .. '/file_c.txt' }
         end,
         destroy = function(outputs, ctx)
-          ctx:cmd({ cmd = 'rm -f ' .. outputs.file, env = { PATH = STANDARD_PATH } })
+          sh(ctx, 'rm -f ' .. outputs.file)
         end,
       })
     elseif phase == 'success' then
       sys.bind({
         outputs = { file = TEST_DIR .. '/file_c.txt' },
         apply = function(_, ctx)
-          ctx:cmd({ cmd = 'mkdir -p ' .. TEST_DIR, env = { PATH = STANDARD_PATH } })
-          ctx:cmd({
-            cmd = 'echo "Content C - created at $(date)" > ' .. TEST_DIR .. '/file_c.txt',
-            env = { PATH = STANDARD_PATH },
-          })
+          sh(ctx, 'mkdir -p ' .. TEST_DIR)
+          sh(ctx, 'echo "Content C - created at $(date)" > ' .. TEST_DIR .. '/file_c.txt')
           return { file = TEST_DIR .. '/file_c.txt' }
         end,
         destroy = function(outputs, ctx)
-          ctx:cmd({ cmd = 'rm -f ' .. outputs.file, env = { PATH = STANDARD_PATH } })
+          sh(ctx, 'rm -f ' .. outputs.file)
         end,
       })
     end

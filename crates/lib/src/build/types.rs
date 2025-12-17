@@ -120,7 +120,7 @@ mod tests {
   use super::*;
 
   mod build_def {
-    use crate::{action::actions::cmd::CmdOpts, consts::OBJ_HASH_PREFIX_LEN};
+    use crate::{action::actions::exec::ExecOpts, consts::OBJ_HASH_PREFIX_LEN};
 
     use super::*;
 
@@ -169,8 +169,8 @@ mod tests {
       let def1 = simple_def();
 
       let mut def2 = simple_def();
-      def2.apply_actions.push(Action::Cmd(CmdOpts {
-        cmd: "make".to_string(),
+      def2.apply_actions.push(Action::Exec(ExecOpts {
+        bin: "make".to_string(),
         args: None,
         env: None,
         cwd: None,
@@ -188,14 +188,14 @@ mod tests {
         version: None,
         inputs: None,
         apply_actions: vec![
-          Action::Cmd(CmdOpts {
-            cmd: "step1".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "step1".to_string(),
             args: None,
             env: None,
             cwd: None,
           }),
-          Action::Cmd(CmdOpts {
-            cmd: "step2".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "step2".to_string(),
             args: None,
             env: None,
             cwd: None,
@@ -209,14 +209,14 @@ mod tests {
         version: None,
         inputs: None,
         apply_actions: vec![
-          Action::Cmd(CmdOpts {
-            cmd: "step2".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "step2".to_string(),
             args: None,
             env: None,
             cwd: None,
           }),
-          Action::Cmd(CmdOpts {
-            cmd: "step1".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "step1".to_string(),
             args: None,
             env: None,
             cwd: None,
@@ -242,8 +242,8 @@ mod tests {
             url: "https://example.com/src.tar.gz".to_string(),
             sha256: "abc123".to_string(),
           },
-          Action::Cmd(CmdOpts {
-            cmd: "make".to_string(),
+          Action::Exec(ExecOpts {
+            bin: "make".to_string(),
             args: Some(vec!["install".to_string()]),
             env: Some(env),
             cwd: Some("/build".to_string()),

@@ -415,7 +415,7 @@ mod tests {
   use super::*;
   use crate::util::testutil::{echo_msg, shell_cmd};
   use crate::{
-    action::{Action, actions::cmd::CmdOpts},
+    action::{Action, actions::exec::ExecOpts},
     util::hash::Hashable,
   };
   use serial_test::serial;
@@ -427,8 +427,8 @@ mod tests {
       name: "test-build".to_string(),
       version: Some("1.0.0".to_string()),
       inputs: None,
-      apply_actions: vec![Action::Cmd(CmdOpts {
-        cmd: cmd.to_string(),
+      apply_actions: vec![Action::Exec(ExecOpts {
+        bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
@@ -504,8 +504,8 @@ mod tests {
         name: "test-build".to_string(),
         version: Some("1.0.0".to_string()),
         inputs: None,
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: cmd.to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: cmd.to_string(),
           args: Some(args),
           env: None,
           cwd: None,
@@ -551,21 +551,21 @@ mod tests {
         version: None,
         inputs: None,
         apply_actions: vec![
-          Action::Cmd(CmdOpts {
-            cmd: cmd1.to_string(),
+          Action::Exec(ExecOpts {
+            bin: cmd1.to_string(),
             args: Some(args1),
             env: None,
             cwd: None,
           }),
-          Action::Cmd(CmdOpts {
-            cmd: cmd2.to_string(),
+          Action::Exec(ExecOpts {
+            bin: cmd2.to_string(),
             args: Some(args2),
             env: None,
             cwd: None,
           }),
-          Action::Cmd(CmdOpts {
+          Action::Exec(ExecOpts {
             // Reference previous action output
-            cmd: cmd3.to_string(),
+            bin: cmd3.to_string(),
             args: Some(args3),
             env: None,
             cwd: None,
@@ -608,8 +608,8 @@ mod tests {
         name: "failing-build".to_string(),
         version: None,
         inputs: None,
-        apply_actions: vec![Action::Cmd(CmdOpts {
-          cmd: cmd.to_string(),
+        apply_actions: vec![Action::Exec(ExecOpts {
+          bin: cmd.to_string(),
           args: Some(args),
           env: None,
           cwd: None,
