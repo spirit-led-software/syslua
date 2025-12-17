@@ -128,6 +128,8 @@ jobs:
         run: cargo install git-cliff
 
       - name: Extract changelog for this version
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/}"
           # Generate changelog for just this release

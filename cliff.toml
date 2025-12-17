@@ -40,7 +40,7 @@ body = """
   {%- if contributor.pr_number %} in [#{{ contributor.pr_number }}]({{ self::remote_url() }}/pull/{{ contributor.pr_number }}){% endif %}
 {%- endfor %}
 
-{% if version %}
+{% if version and previous.version %}
 **Full Changelog**: {{ self::remote_url() }}/compare/{{ previous.version }}...{{ version }}
 {% endif %}
 """

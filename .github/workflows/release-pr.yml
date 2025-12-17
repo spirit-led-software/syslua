@@ -65,6 +65,8 @@ jobs:
         run: cargo update -w
 
       - name: Generate changelog
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # Generate changelog for the new version
           git-cliff --tag v${{ inputs.version }} -o CHANGELOG.md
@@ -80,6 +82,7 @@ jobs:
       - name: Create Pull Request
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # Extract changelog for this version to use as PR body
           CHANGELOG_BODY=$(git-cliff --tag v${{ inputs.version }} --unreleased --strip header)
