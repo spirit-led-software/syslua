@@ -91,10 +91,8 @@ pub fn cache_dir() -> PathBuf {
 #[cfg(not(windows))]
 mod tests {
   use super::*;
-  use serial_test::serial;
 
   #[test]
-  #[serial]
   fn xdg_config_home_takes_precedence() {
     temp_env::with_vars(
       [
@@ -108,7 +106,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn xdg_fallback_to_home_directories() {
     temp_env::with_vars(
       [

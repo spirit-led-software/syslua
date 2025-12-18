@@ -271,11 +271,9 @@ pub fn update_luarc_inputs(config_dir: &Path, inputs: &ResolvedInputs, system: b
 #[cfg(test)]
 mod tests {
   use super::*;
-  use serial_test::serial;
   use tempfile::TempDir;
 
   #[test]
-  #[serial]
   fn init_creates_all_files() {
     let temp = TempDir::new().unwrap();
     let config_dir = temp.path().join("config");
@@ -310,7 +308,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn init_fails_if_init_lua_exists() {
     let temp = TempDir::new().unwrap();
     let config_dir = temp.path().join("config");
@@ -342,7 +339,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn init_fails_if_luarc_exists() {
     let temp = TempDir::new().unwrap();
     let config_dir = temp.path().join("config");
@@ -374,7 +370,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn init_luarc_contains_correct_types_path() {
     let temp = TempDir::new().unwrap();
     let config_dir = temp.path().join("config");
@@ -411,7 +406,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn init_creates_parent_directories() {
     let temp = TempDir::new().unwrap();
     let config_dir = temp.path().join("nested").join("path").join("config");

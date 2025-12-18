@@ -6,7 +6,6 @@
 use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
-use serial_test::serial;
 use tempfile::TempDir;
 
 /// Get a Command for the sys binary.
@@ -83,34 +82,30 @@ fn subcommand_help_works() {
 // =============================================================================
 
 #[test]
-#[serial]
 fn init_creates_config_files() {
   let temp = TempDir::new().unwrap();
   let init_dir = temp.path().join("myconfig");
 
-  sys_cmd()
-    .arg("init")
-    .arg(&init_dir)
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .success();
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd().arg("init").arg(&init_dir).assert().success();
+  });
 
   assert!(init_dir.join("init.lua").exists());
   assert!(init_dir.join(".luarc.json").exists());
 }
 
 #[test]
-#[serial]
 fn init_fails_if_config_exists() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  sys_cmd()
-    .arg("init")
-    .arg(temp.path())
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .failure()
-    .stderr(predicate::str::contains("already exists"));
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("init")
+      .arg(temp.path())
+      .assert()
+      .failure()
+      .stderr(predicate::str::contains("already exists"));
+  });
 }
 
 // =============================================================================
@@ -118,43 +113,43 @@ fn init_fails_if_config_exists() {
 // =============================================================================
 
 #[test]
-#[serial]
 fn plan_with_minimal_config() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  sys_cmd()
-    .arg("plan")
-    .arg(temp.path().join("init.lua"))
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .success();
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("plan")
+      .arg(temp.path().join("init.lua"))
+      .assert()
+      .success();
+  });
 }
 
 #[test]
-#[serial]
 fn plan_with_build_shows_build_count() {
   let temp = temp_config(BUILD_CONFIG);
 
-  sys_cmd()
-    .arg("plan")
-    .arg(temp.path().join("init.lua"))
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .success()
-    .stdout(predicate::str::contains("Builds: 1"));
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("plan")
+      .arg(temp.path().join("init.lua"))
+      .assert()
+      .success()
+      .stdout(predicate::str::contains("Builds: 1"));
+  });
 }
 
 #[test]
-#[serial]
 fn plan_nonexistent_config_fails() {
   let temp = TempDir::new().unwrap();
 
-  sys_cmd()
-    .arg("plan")
-    .arg("/nonexistent/path/config.lua")
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .failure();
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("plan")
+      .arg("/nonexistent/path/config.lua")
+      .assert()
+      .failure();
+  });
 }
 
 // =============================================================================
@@ -162,45 +157,50 @@ fn plan_nonexistent_config_fails() {
 // =============================================================================
 
 #[test]
-#[serial]
 fn apply_minimal_config() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  sys_cmd()
-    .arg("apply")
-    .arg(temp.path().join("init.lua"))
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .success()
-    .stdout(predicate::str::contains("Apply complete"));
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("apply")
+      .arg(temp.path().join("init.lua"))
+      .assert()
+      .success()
+      .stdout(predicate::str::contains("Apply complete"));
+  });
 }
 
 #[test]
-#[serial]
 fn apply_with_build_succeeds() {
   let temp = temp_config(BUILD_CONFIG);
 
-  sys_cmd()
-    .arg("apply")
-    .arg(temp.path().join("init.lua"))
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .env("XDG_DATA_HOME", temp.path().join("data"))
-    .assert()
-    .success()
-    .stdout(predicate::str::contains("Builds realized: 1"));
+  temp_env::with_vars(
+    [
+      ("SYSLUA_USER_STORE", Some(temp.path().join("store"))),
+      ("XDG_DATA_HOME", Some(temp.path().join("data"))),
+    ],
+    || {
+      sys_cmd()
+        .arg("apply")
+        .arg(temp.path().join("init.lua"))
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Builds realized: 1"));
+    },
+  );
 }
 
 #[test]
-#[serial]
 fn apply_nonexistent_config_fails() {
   let temp = TempDir::new().unwrap();
 
-  sys_cmd()
-    .arg("apply")
-    .arg("/nonexistent/path/config.lua")
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .failure();
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("apply")
+      .arg("/nonexistent/path/config.lua")
+      .assert()
+      .failure();
+  });
 }
 
 // =============================================================================
@@ -208,18 +208,18 @@ fn apply_nonexistent_config_fails() {
 // =============================================================================
 
 #[test]
-#[serial]
 fn destroy_placeholder_works() {
   // destroy is currently a placeholder that just prints a message
   let temp = TempDir::new().unwrap();
 
-  sys_cmd()
-    .arg("destroy")
-    .arg(temp.path().join("init.lua"))
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .success()
-    .stdout(predicate::str::contains("destroy"));
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("destroy")
+      .arg(temp.path().join("init.lua"))
+      .assert()
+      .success()
+      .stdout(predicate::str::contains("destroy"));
+  });
 }
 
 // =============================================================================
@@ -227,32 +227,32 @@ fn destroy_placeholder_works() {
 // =============================================================================
 
 #[test]
-#[serial]
 fn update_with_no_inputs() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  sys_cmd()
-    .arg("update")
-    .arg(temp.path().join("init.lua"))
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .success()
-    .stdout(predicate::str::contains("up to date"));
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("update")
+      .arg(temp.path().join("init.lua"))
+      .assert()
+      .success()
+      .stdout(predicate::str::contains("up to date"));
+  });
 }
 
 #[test]
-#[serial]
 fn update_dry_run() {
   let temp = temp_config(MINIMAL_CONFIG);
 
-  sys_cmd()
-    .arg("update")
-    .arg(temp.path().join("init.lua"))
-    .arg("--dry-run")
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .success()
-    .stdout(predicate::str::contains("Dry run"));
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("update")
+      .arg(temp.path().join("init.lua"))
+      .arg("--dry-run")
+      .assert()
+      .success()
+      .stdout(predicate::str::contains("Dry run"));
+  });
 }
 
 // =============================================================================
@@ -260,7 +260,6 @@ fn update_dry_run() {
 // =============================================================================
 
 #[test]
-#[serial]
 fn info_shows_platform() {
   sys_cmd()
     .arg("info")
@@ -274,27 +273,27 @@ fn info_shows_platform() {
 // =============================================================================
 
 #[test]
-#[serial]
 fn invalid_lua_syntax_fails() {
   let temp = temp_config("this is not valid lua {{{");
 
-  sys_cmd()
-    .arg("plan")
-    .arg(temp.path().join("init.lua"))
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .failure();
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("plan")
+      .arg(temp.path().join("init.lua"))
+      .assert()
+      .failure();
+  });
 }
 
 #[test]
-#[serial]
 fn missing_setup_function_fails() {
   let temp = temp_config("return { inputs = {} }");
 
-  sys_cmd()
-    .arg("plan")
-    .arg(temp.path().join("init.lua"))
-    .env("SYSLUA_USER_STORE", temp.path().join("store"))
-    .assert()
-    .failure();
+  temp_env::with_vars([("SYSLUA_USER_STORE", Some(temp.path().join("store")))], || {
+    sys_cmd()
+      .arg("plan")
+      .arg(temp.path().join("init.lua"))
+      .assert()
+      .failure();
+  });
 }
