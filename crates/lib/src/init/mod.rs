@@ -103,8 +103,12 @@ pub fn init(options: &InitOptions) -> Result<InitResult, InitError> {
   let snapshots_dir = base_dir.join("snapshots");
 
   // Create store structure
-  fs::create_dir_all(store_dir.join("obj")).map_err(|e| InitError::CreateDir {
-    path: store_dir.join("obj"),
+  fs::create_dir_all(store_dir.join("build")).map_err(|e| InitError::CreateDir {
+    path: store_dir.join("build"),
+    source: e,
+  })?;
+  fs::create_dir_all(store_dir.join("bind")).map_err(|e| InitError::CreateDir {
+    path: store_dir.join("bind"),
     source: e,
   })?;
   fs::create_dir_all(&types_dir).map_err(|e| InitError::CreateDir {
@@ -297,7 +301,8 @@ mod tests {
         assert!(result.luarc_json.exists(), ".luarc.json should exist");
 
         // Verify store structure exists
-        assert!(result.store_dir.join("obj").exists(), "store/obj should exist");
+        assert!(result.store_dir.join("build").exists(), "store/build should exist");
+        assert!(result.store_dir.join("bind").exists(), "store/bind should exist");
         assert!(result.types_dir.exists(), "types dir should exist");
         assert!(
           result.types_dir.join("globals.d.lua").exists(),

@@ -1,8 +1,8 @@
-# sys.lua Architecture Overview
+# SysLua Architecture Overview
 
-> **Note:** This is a design document describing the target architecture for sys.lua.
+> **Note:** This is a design document describing the target architecture for SysLua.
 
-sys.lua is a cross-platform declarative system/environment manager inspired by Nix.
+SysLua is a cross-platform declarative system/environment manager inspired by Nix.
 
 ## Core Values
 
@@ -21,8 +21,8 @@ sys.lua is a cross-platform declarative system/environment manager inspired by N
 This is a core value that permeates the entire design:
 
 ```lua
--- sys.lua modules are plain Lua modules
-local nginx = require("syslua.modules.services.nginx")
+-- SysLua modules are plain Lua modules
+local nginx = require('syslua.modules.services.nginx')
 nginx.setup({ port = 8080 })
 
 -- No magic. Just:
@@ -40,11 +40,11 @@ What this means in practice:
 | Explicit function calls     | Implicit behavior     |
 | Standard `for`/`if`/`while` | Custom control flow   |
 
-If you know Lua, you know how to use sys.lua.
+If you know Lua, you know how to use SysLua.
 
 ## The Two Primitives
 
-Everything in sys.lua builds on two fundamental concepts:
+Everything in SysLua builds on two fundamental concepts:
 
 ```
 Build (sys.build {})              Bind (sys.bind {})
@@ -62,7 +62,8 @@ Output: immutable store object    Output: system side effects
                                   be rolled back.
 ```
 
-All user-facing APIs (`lib.file.setup()`, `lib.env.setup()`, `lib.user.setup()`, `package.setup()`) internally create builds and/or binds.
+All modules are built using these two primitives. For example, a service module may define a build that compiles the
+service binary, and a bind that sets up the service to run on system startup.
 
 ## The `exec` Action
 
@@ -70,21 +71,33 @@ Both builds and binds use a flexible `exec` action for executing platform-specif
 
 ```lua
 -- Build context: execute commands during build
-sys.build({
-  name = "my-tool",
+local my_tool = sys.build({
+  id = 'my-tool',
+  inputs = {
+    make = require('syslua.modules.build_tools.make').setup(),
+  },
   apply = function(inputs, ctx)
-    local build_dir = ctx:exec({ bin = "make", cwd = "/build" })
-    ctx:exec({ bin = "make install", env = { PREFIX = build_dir } })
+    local build_dir = ctx:exec({ bin = inputs.make.outputs.bin, cwd = '/build' })
+    ctx:exec({
+      bin = inputs.make.outputs.bin,
+      args = { 'install' },
+      env = { PREFIX = build_dir },
+    })
   end,
 })
 
--- Bind context: apply and destroy are separate functions
+-- Bind context: create and destroy are separate functions
 sys.bind({
-  apply = function(inputs, ctx)
-    ctx:exec('ln -s "/src" "/dest"')
+  inputs = {
+    tool = my_tool,
+  },
+  create = function(inputs, ctx)
+    local dest = '/usr/local/sbin/my-tool'
+    ctx:exec(string.format('ln -s "%s" "%s"', inputs.tool.outputs.bin, dest))
+    return { dest = dest }
   end,
-  destroy = function(inputs, ctx)  -- Optional: for rollback support
-    ctx:exec('rm "/dest"')
+  destroy = function(inputs, ctx)
+    ctx:exec(string.format('rm "%s"', inputs.dest))
   end,
 })
 ```
@@ -95,25 +108,25 @@ This design provides maximum flexibility - the Lua configuration decides what co
 
 The Rust implementation is intentionally minimal, covering:
 
-| Component     | Purpose                                 |
-| ------------- | --------------------------------------- |
-| **Builds**    | Hashing, realization, build context     |
-| **Binds**     | Execution of system side effects        |
-| **Store**     | Content-addressed storage, immutability |
-| **Lua parsing** | Config evaluation via mlua            |
-| **Snapshots** | History and rollback                    |
+| Component       | Purpose                                 |
+| --------------- | --------------------------------------- |
+| **Builds**      | Hashing, realization, build context     |
+| **Binds**       | Execution of system side effects        |
+| **Store**       | Content-addressed storage, immutability |
+| **Lua parsing** | Config evaluation via mlua              |
+| **Snapshots**   | History and rollback                    |
 
 ## Terminology
 
-| Term           | Definition                                                       |
-| -------------- | ---------------------------------------------------------------- |
-| **Build**      | Immutable description of how to produce store content            |
-| **Bind**       | Description of what to do with build output                      |
-| **Store**      | Global, immutable location for package content (`/syslua/store`) |
-| **Store Object** | Content-addressed directory in `store/obj/<name>-<hash>/` (20-char truncated hash) |
-| **Manifest**   | Intermediate representation from evaluating Lua config           |
-| **Snapshot**   | Point-in-time capture of builds + binds                          |
-| **Input**      | Declared source of packages (GitHub repo, local path, Git URL)   |
+| Term            | Definition                                                                    |
+| --------------- | ----------------------------------------------------------------------------- |
+| **Build**       | Immutable description of how to produce store content                         |
+| **Bind**        | Description of what to do with build output                                   |
+| **Store**       | Global, immutable location for package content (`/syslua/store`)              |
+| **Store Build** | Content-addressed directory in `store/build/<hash>/` (20-char truncated hash) |
+| **Manifest**    | Intermediate representation from evaluating Lua config                        |
+| **Snapshot**    | Point-in-time capture of builds + binds                                       |
+| **Input**       | Declared source of packages (GitHub repo, local path, Git URL)                |
 
 ## High-Level Architecture
 
@@ -127,8 +140,8 @@ The Rust implementation is intentionally minimal, covering:
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                Evaluation & Resolution                   │
-│  - Parse Lua → Manifest                                 │
 │  - Resolve inputs from lock file                        │
+│  - Parse Lua → Manifest                                 │
 │  - Priority-based conflict resolution                   │
 └───────────────────────────┬─────────────────────────────┘
                             │
@@ -150,7 +163,7 @@ The Rust implementation is intentionally minimal, covering:
                             ▼
 ┌─────────────────────────────────────────────────────────┐
 │                   Immutable Store                        │
-│  obj/<name>-<hash>/   Content-addressed objects (20-char hash) │
+│  build/<hash>/   Content-addressed objects (20-char hash) │
 │  bind/<hash>/         Bind state tracking (20-char hash)       │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -159,17 +172,17 @@ The Rust implementation is intentionally minimal, covering:
 
 This architecture is documented across focused files:
 
-| Document                           | Content                                       |
-| ---------------------------------- | --------------------------------------------- |
-| [01-builds.md](./01-builds.md)     | Build system, context API, hashing            |
-| [02-binds.md](./02-binds.md)       | Bind types, execution, examples               |
-| [03-store.md](./03-store.md)       | Store layout, realization, immutability       |
-| [04-lua-api.md](./04-lua-api.md)   | Lua API layers, globals, type definitions     |
-| [05-snapshots.md](./05-snapshots.md) | Snapshot design, rollback, garbage collection |
-| [06-inputs.md](./06-inputs.md)     | Input sources, registry, lock files           |
-| [07-modules.md](./07-modules.md)   | Module system, auto-evaluation                |
-| [08-apply-flow.md](./08-apply-flow.md) | Apply flow, DAG execution, atomicity      |
-| [09-platform.md](./09-platform.md) | Platform-specific: services, env, paths       |
+| Document                               | Content                                       |
+| -------------------------------------- | --------------------------------------------- |
+| [01-builds.md](./01-builds.md)         | Build system, context API, hashing            |
+| [02-binds.md](./02-binds.md)           | Bind types, execution, examples               |
+| [03-store.md](./03-store.md)           | Store layout, realization, immutability       |
+| [04-lua-api.md](./04-lua-api.md)       | Lua API layers, globals, type definitions     |
+| [05-snapshots.md](./05-snapshots.md)   | Snapshot design, rollback, garbage collection |
+| [06-inputs.md](./06-inputs.md)         | Input sources, registry, lock files           |
+| [07-modules.md](./07-modules.md)       | Module system, auto-evaluation                |
+| [08-apply-flow.md](./08-apply-flow.md) | Apply flow, DAG execution, atomicity          |
+| [09-platform.md](./09-platform.md)     | Platform-specific: services, env, paths       |
 
 ## Key Design Decisions
 

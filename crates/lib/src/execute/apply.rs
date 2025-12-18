@@ -25,7 +25,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::bind::execute::{apply_bind, destroy_bind, update_bind};
 use crate::bind::state::{BindState, BindStateError, load_bind_state, remove_bind_state, save_bind_state};
-use crate::build::store::build_path;
+use crate::build::store::build_dir_path;
 use crate::eval::{EvalError, evaluate_config};
 use crate::execute::execute_manifest;
 use crate::manifest::Manifest;
@@ -619,7 +619,7 @@ fn build_restore_resolver_data(
 
   // Compute BuildResult for each build (just need store_path and outputs)
   for (hash, build_def) in &manifest.builds {
-    let store_path = build_path(hash, system);
+    let store_path = build_dir_path(hash, system);
 
     // Resolve outputs - for now use the definition's output patterns
     // In practice, builds in the store should have their outputs already resolved

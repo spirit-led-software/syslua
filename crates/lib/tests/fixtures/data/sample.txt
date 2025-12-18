@@ -1,0 +1,2 @@
+This is sample test data.
+It can be used as a source file for file.setup tests.

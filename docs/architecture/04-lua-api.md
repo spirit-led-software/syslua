@@ -40,18 +40,18 @@ function M.setup(inputs)
   -- Access resolved inputs via require
   local private = require('private') -- reads init.lua at root of private repo
   local syslua = require('syslua')
-  local lib = syslua.lib
+  local modules = require('syslua.modules')
 
   -- Configure packages and modules
   require('syslua.pkgs.cli.ripgrep').setup()
   private.setup_dotfiles()
 
-  lib.user.setup({
+  modules.user.setup({
     name = 'alice',
     setup = function()
       -- inputs accessible via closure
-      syslua.pkgs.editors.neovim.setup({ colorscheme = 'gruvbox' })
-      lib.file.setup({ path = '~/.gitconfig', source = inputs.private.path .. '/gitconfig' })
+      require('syslua.pkgs.editors.neovim').setup({ colorscheme = 'gruvbox' })
+      modules.file.setup({ path = '~/.gitconfig', source = inputs.private.path .. '/gitconfig' })
     end,
   })
 end
@@ -83,7 +83,10 @@ local M = {}
 
 function M.setup()
   sys.build({
-    ...,
+    id = "my-tool",
+    create = function(inputs, ctx)
+      return { out = ctx.out }
+    end,
   })
 end
 
@@ -106,9 +109,9 @@ return M
 ├─────────────────────────────────────────────┤
 │  Core primitives: sys.build {}, sys.bind {} │  ← Everything builds on this
 ├─────────────────────────────────────────────┤
-│  Contexts: BuildCtx, BindCtx                │  ← Passed to config functions
+│  Contexts: ActionCtx                        │  ← Passed to create/update/destroy
 ├─────────────────────────────────────────────┤
-│  syslua.lib: toJSON, mkDefault, mkForce     │  ← Utility functions
+│  Helpers: sys.path, toJSON                  │  ← Utility functions
 └─────────────────────────────────────────────┘
 ```
 
@@ -138,8 +141,8 @@ end)
 
 -- Now available on any ActionCtx:
 sys.build({
-  name = "my-tool",
-  apply = function(inputs, ctx)
+  id = "my-tool",
+  create = function(inputs, ctx)
     ctx:mkdir(ctx.out .. "/bin")  -- Uses the registered method
     return { out = ctx.out }
   end,
@@ -158,37 +161,54 @@ sys.build({
 - Registration is global—methods are available to all subsequent builds/binds
 - Unknown method calls produce helpful error messages suggesting `sys.register_ctx_method`
 
-### Convenience Helpers (Lua, provided by syslua input source)
+### Convenience Helpers (Lua, via `require('syslua.modules')`)
 
 | Function              | Purpose                               |
 | --------------------- | ------------------------------------- |
-| `lib.file.setup()`    | Declare a managed file                |
-| `lib.env.setup()`     | Declare environment variables         |
-| `lib.user.setup()`    | Declare per-user scoped configuration |
-| `lib.project.setup()` | Declare project-scoped environment    |
+| `modules.file.setup()`    | Declare a managed file                |
+| `modules.env.setup()`     | Declare environment variables         |
+| `modules.user.setup()`    | Declare per-user scoped configuration |
+| `modules.project.setup()` | Declare project-scoped environment    |
+
+> **Note:** These helpers are accessed via `local modules = require('syslua.modules')`, not as globals.
 
 Note: There is no `service()` or `pkg()` global. Packages and services are plain Lua modules:
 
 ```lua
-require('pkgs.cli.ripgrep').setup()
-require('pkgs.cli.ripgrep').setup({ version = '14.0.0' })
-require('modules.services.nginx').setup({ port = 8080 })
+require('syslua.pkgs.cli.ripgrep').setup()
+require('syslua.pkgs.cli.ripgrep').setup({ version = '14.0.0' })
+require('syslua.modules.services.nginx').setup({ port = 8080 })
 ```
 
 ### System Information
 
-The global `syslua` table provides system information:
+The global `sys` table provides system information:
 
 ```lua
-syslua.platform   -- "aarch64-darwin", "x86_64-linux", etc.
-syslua.os         -- "darwin", "linux", "windows"
-syslua.arch       -- "aarch64", "x86_64", "arm"
-syslua.hostname   -- Machine hostname
-syslua.username   -- Current user
-syslua.version    -- sys.lua version string
+sys.platform   -- "aarch64-darwin", "x86_64-linux", etc.
+sys.os         -- "darwin", "linux", "windows"
+sys.arch       -- "aarch64", "x86_64", "i386"
 ```
 
-## Library Functions (`syslua.lib`)
+### Path Utilities
+
+The `sys.path` table provides cross-platform path helpers:
+
+```lua
+sys.path.resolve(...)        -- Resolve to absolute path
+sys.path.join(...)           -- Join path segments
+sys.path.dirname(path)       -- Get directory name
+sys.path.basename(path)      -- Get file name
+sys.path.extname(path)       -- Get file extension
+sys.path.is_absolute(path)   -- Check if path is absolute
+sys.path.normalize(path)     -- Normalize path (resolve . and ..)
+sys.path.relative(from, to)  -- Get relative path
+sys.path.split(path)         -- Split into components
+```
+
+## Library Functions
+
+> **Future Feature:** The priority system (`mkDefault`, `mkForce`, etc.) is documented but not yet implemented.
 
 ```lua
 local lib = require('syslua.lib')
@@ -196,17 +216,17 @@ local lib = require('syslua.lib')
 -- JSON conversion
 lib.toJSON(table) -- Convert Lua table to JSON string
 
--- Priority functions for conflict resolution
-lib.mkDefault(value) -- Priority 1000 (can be overridden)
-lib.mkForce(value) -- Priority 50 (forces value)
-lib.mkBefore(value) -- Priority 500 (prepend to mergeable)
-lib.mkAfter(value) -- Priority 1500 (append to mergeable)
-lib.mkOverride(priority, value) -- Explicit priority
-lib.mkOrder(priority, value) -- Alias for mkOverride
+-- FUTURE: Priority functions for conflict resolution (not yet implemented)
+-- lib.mkDefault(value) -- Priority 1000 (can be overridden)
+-- lib.mkForce(value) -- Priority 50 (forces value)
+-- lib.mkBefore(value) -- Priority 500 (prepend to mergeable)
+-- lib.mkAfter(value) -- Priority 1500 (append to mergeable)
+-- lib.mkOverride(priority, value) -- Explicit priority
+-- lib.mkOrder(priority, value) -- Alias for mkOverride
 
--- Environment variable definitions
-lib.env.defineMergeable(var_name) -- PATH-like variables
-lib.env.defineSingular(var_name) -- Single-value variables
+-- FUTURE: Environment variable definitions (not yet implemented)
+-- lib.env.defineMergeable(var_name) -- PATH-like variables
+-- lib.env.defineSingular(var_name) -- Single-value variables
 ```
 
 ## Lua Language Server (LuaLS) Integration
@@ -224,78 +244,70 @@ sys.lua provides excellent IDE/editor support through type definition files and 
 
 ### Type Definition Files
 
-sys.lua ships with comprehensive type definitions in `lib/types/`:
+sys.lua ships with comprehensive type definitions:
 
 ```
 syslua/
-├── lib/
-│   ├── types/
-│   │   ├── syslua.d.lua         # Global syslua table
-│   │   ├── syslua.lib.d.lua     # syslua.lib module
-│   │   ├── globals.d.lua        # derive(), activate(), input()
-│   │   ├── modules.d.lua        # Module system types
-│   └── init.lua                 # Actual runtime implementations
+├── lua/
+│   └── syslua/
+│       └── globals.d.lua     # All type definitions
 ```
 
 ### Example Type Definitions
 
-**`lib/types/syslua.d.lua`:**
+**`globals.d.lua`:**
 
 ```lua
 ---@meta
-
----@class Sys
----@field platform string Platform identifier (e.g., "x86_64-linux", "aarch64-darwin")
----@field os "linux"|"darwin"|"windows" Operating system
----@field arch "x86_64"|"aarch64"|"arm" CPU architecture
----@field hostname string Machine hostname
----@field username string Current user
----@field version string sys.lua version (e.g., "0.1.0")
----@field path PathHelpers Path utilities
----@field build fun(spec: BuildSpec): BuildRef Create a build
----@field bind fun(spec: BindSpec): BindRef Create a bind
-
----Global sys system information
----@type Sys
-sys = {}
-```
-
-**`lib/types/globals.d.lua`:**
-
-```lua
----@meta
-
----@class BuildRef
----@field name string Build name
----@field version? string Version string
----@field hash string Content-addressed hash
----@field outputs table<string, string> All output paths
-
----@class BuildSpec
----@field name string Required: build name
----@field version? string Optional: version string
----@field outputs? table<string,string> Optional: output names (default: {out="out"})
----@field inputs? table|fun(): table Optional: input data
----@field config fun(inputs: table, ctx: BuildCtx): nil Required: build logic
-
----@class BuildCtx
----@field outputs table<string, string> Output paths
----@field fetch_url fun(self: BuildCtx, url: string, sha256: string): string Returns opaque reference to downloaded file
----@field exec fun(self: BuildCtx, opts: ExecOpts|string): string Returns opaque reference to stdout
 
 ---@class ExecOpts
----@field bin string Binary/command to execute
----@field args? string[] Arguments to pass to the command
----@field env? table<string,string> Environment variables
----@field cwd? string Working directory
+---@field bin string Path to binary/executable to run
+---@field args? string[] Optional: arguments to pass to the binary
+---@field env? table<string,string> Optional: environment variables
+---@field cwd? string Optional: working directory
+
+---@class ActionCtx
+---@field out string Returns the store path placeholder
+---@field fetch_url fun(self: ActionCtx, url: string, sha256: string): string Fetches a URL and returns store path
+---@field write_file fun(self: ActionCtx, path: string, content: string): string Writes content to a file, returns path
+---@field exec fun(self: ActionCtx, opts: string | ExecOpts, args?: string[]): string Executes a command, returns stdout
+
+---@class BuildRef
+---@field id? string Build id
+---@field inputs? table All inputs to the build
+---@field outputs table All outputs from the build
+---@field hash string Content-addressed hash
+
+---@class BuildSpec
+---@field id? string Optional: build id for debugging/logging
+---@field inputs? table|fun(): table Optional: input data
+---@field create fun(inputs: table, ctx: ActionCtx): table Required: build logic, returns outputs
+
+---@class BindRef
+---@field id? string Binding id
+---@field inputs? table All inputs to the binding
+---@field outputs? table All outputs from the binding
+---@field hash string Hash for deduplication
 
 ---@class BindSpec
+---@field id? string Binding id. Required when providing update method
 ---@field inputs? table|fun(): table Optional: input data
----@field apply fun(inputs: table, ctx: BindCtx): table? Required: apply logic, can return outputs
----@field destroy? fun(inputs: table, ctx: BindCtx): nil Optional: destroy logic for rollback
+---@field create fun(inputs: table, ctx: ActionCtx): table|nil Required: binding logic, optionally returns outputs
+---@field update? fun(outputs: table, inputs: table, ctx: ActionCtx): table|nil Optional: update logic
+---@field destroy? fun(outputs: table, ctx: ActionCtx): nil Optional: cleanup logic, receives outputs
 
----@class BindCtx
----@field exec fun(self: BindCtx, opts: ExecOpts|string): string Returns opaque reference to stdout
+---@class Sys
+---@field platform Platform Active platform
+---@field os Os Operating system name
+---@field arch Arch System architecture
+---@field path PathHelpers File path utilities
+---@field build fun(spec: BuildSpec): BuildRef Creates a build within the store
+---@field bind fun(spec: BindSpec): BindRef Creates a binding to the active system
+---@field register_ctx_method fun(name: string, fn: fun(ctx: ActionCtx, ...: any): any)
+---@field unregister_ctx_method fun(name: string)
+
+---@type Sys
+sys = {}
 ```
 
 ### Workspace Configuration
@@ -312,7 +324,7 @@ sys.lua automatically generates a `.luarc.json` file when you run `sys apply`. T
     "checkThirdParty": false
   },
   "diagnostics": {
-    "globals": ["sys", "input"]
+    "globals": ["sys", "input", "__dir"]
   },
   "completion": {
     "callSnippet": "Both",
@@ -371,14 +383,14 @@ Regenerated .luarc.json
 In addition to LSP-based type checking, sys.lua performs runtime validation during config evaluation:
 
 ```lua
--- Invalid config examples
-local lib = require('syslua.lib')
+local modules = require('syslua.modules')
 
-lib.env.setup({
+-- Invalid config examples
+modules.env.setup({
   EDITOR = { 'nvim' }, -- ✗ Runtime error: singular env var must be string
 })
 
-lib.file.setup({
+modules.file.setup({
   path = '~/.gitconfig',
   content = '...',
   source = '...', -- ✗ Runtime error: cannot specify both content and source
@@ -403,26 +415,35 @@ Error evaluating sys.lua:
   Suggestion: setup({ version = "0.10.0" })
 ```
 
-## The `config` Property Pattern
+## The `create` Function Pattern
 
 ### In `sys.build {}` and `sys.bind {}`
 
-The `config` function receives resolved options and a context object:
+The `create` function receives resolved inputs and an ActionCtx:
 
 ```lua
 sys.build({
-  name = 'ripgrep',
+  id = 'ripgrep',
   inputs = function()
     return { url = '...', sha256 = '...' }
   end,
-  apply = function(inputs, ctx)
+  create = function(inputs, ctx)
     -- ctx provides build operations
     local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-    ctx:exec({ bin = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+    ctx:exec({ bin = 'tar', args = { '-xzf', archive, '-C', ctx.out } })
     return { out = ctx.out }
   end,
 })
 ```
+
+### ActionCtx Methods
+
+| Method | Description | Returns |
+|--------|-------------|---------|
+| `ctx.out` | Property returning the build's output directory placeholder | string |
+| `ctx:fetch_url(url, sha256)` | Download file with hash verification | opaque path reference |
+| `ctx:write_file(path, contents)` | Write contents to a file | opaque path reference |
+| `ctx:exec(opts)` | Execute a command | opaque stdout reference |
 
 ## See Also
 

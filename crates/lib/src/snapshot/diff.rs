@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::build::store::build_dir_name;
+use crate::build::store::build_exists_in_store;
 use crate::manifest::Manifest;
 use crate::util::hash::ObjectHash;
 
@@ -186,13 +186,6 @@ pub fn compute_diff(desired: &Manifest, current: Option<&Manifest>, store_path: 
   diff
 }
 
-/// Check if a build's output directory exists in the store.
-fn build_exists_in_store(hash: &ObjectHash, store_path: &Path) -> bool {
-  let dir_name = build_dir_name(hash);
-  let build_path = store_path.join("obj").join(dir_name);
-  build_path.exists()
-}
-
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -289,7 +282,7 @@ mod tests {
 
     // Create the build directory to simulate cached build
     let build_hash = ObjectHash("abc123def45678901234".to_string());
-    let build_dir = temp_dir.path().join("obj").join("abc123def45678901234");
+    let build_dir = temp_dir.path().join("build").join("abc123def45678901234");
     std::fs::create_dir_all(&build_dir).unwrap();
 
     let mut desired = Manifest::default();
@@ -308,7 +301,7 @@ mod tests {
 
     // Create cached build
     let build_hash = ObjectHash("abc123def45678901234".to_string());
-    let build_dir = temp_dir.path().join("obj").join("abc123def45678901234");
+    let build_dir = temp_dir.path().join("build").join("abc123def45678901234");
     std::fs::create_dir_all(&build_dir).unwrap();
 
     let bind_hash = ObjectHash("bind1".to_string());
@@ -400,7 +393,7 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
 
     // Create some cached builds
-    std::fs::create_dir_all(temp_dir.path().join("obj/abc123def45678901234")).unwrap();
+    std::fs::create_dir_all(temp_dir.path().join("build").join("abc123def45678901234")).unwrap();
 
     let mut current = Manifest::default();
     current
@@ -484,7 +477,7 @@ mod tests {
 
     // Create a cached build with the OLD hash
     let old_hash = ObjectHash("old_hash_12345678901234".to_string());
-    let old_dir = temp_dir.path().join("obj").join("pkg-old_hash_12345678901234");
+    let old_dir = temp_dir.path().join("build").join("pkg-old_hash_12345678901234");
     std::fs::create_dir_all(&old_dir).unwrap();
 
     // Current manifest has the old build
@@ -580,7 +573,7 @@ mod tests {
     let hash_v1 = build_v1.compute_hash().unwrap();
 
     // Cache the v1 build
-    let v1_dir = temp_dir.path().join("obj").join(format!("pkg-1.0.0-{}", &hash_v1.0));
+    let v1_dir = temp_dir.path().join("build").join(format!("pkg-1.0.0-{}", &hash_v1.0));
     std::fs::create_dir_all(&v1_dir).unwrap();
 
     // Current manifest has v1

@@ -11,7 +11,7 @@ use tokio::fs;
 use tracing::{debug, info, warn};
 
 use crate::build::BuildDef;
-use crate::build::store::build_path;
+use crate::build::store::build_dir_path;
 use crate::manifest::Manifest;
 use crate::placeholder;
 
@@ -144,7 +144,7 @@ pub async fn realize_build(
   );
 
   // Compute the store path for this build
-  let store_path = build_path(hash, config.system);
+  let store_path = build_dir_path(hash, config.system);
 
   // Check if already built (cache hit)
   if store_path.exists() {
@@ -254,7 +254,7 @@ pub async fn realize_build_with_resolver(
   );
 
   // Compute the store path for this build
-  let store_path = build_path(hash, config.system);
+  let store_path = build_dir_path(hash, config.system);
 
   // Check if already built (cache hit)
   if store_path.exists() {
@@ -690,7 +690,7 @@ mod tests {
       let config = test_config();
 
       // Pre-create the store path WITHOUT a marker (simulating interrupted build)
-      let store_path = build_path(&hash, config.system);
+      let store_path = build_dir_path(&hash, config.system);
       tokio::fs::create_dir_all(&store_path).await.unwrap();
       tokio::fs::write(store_path.join("partial-file"), "incomplete")
         .await

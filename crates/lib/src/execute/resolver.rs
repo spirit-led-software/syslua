@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::build::store::build_path;
+use crate::build::store::build_dir_path;
 use crate::manifest::Manifest;
 use crate::placeholder::{PlaceholderError, Resolver};
 use crate::util::hash::ObjectHash;
@@ -228,7 +228,7 @@ fn resolve_build_output<'a>(
     let full_hash = manifest.builds.keys().find(|h| h.0.starts_with(hash)).cloned();
 
     if let Some(full_hash) = full_hash {
-      let store_path = build_path(&full_hash, system);
+      let store_path = build_dir_path(&full_hash, system);
       // This is a bit awkward - we need to return a reference but we're computing a value.
       // For now, return an error indicating the build hasn't been realized yet.
       return Err(PlaceholderError::UnresolvedBuild {
