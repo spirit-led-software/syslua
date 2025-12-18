@@ -112,8 +112,8 @@ pub enum BindInputs {
 /// Shell variables like `$HOME` pass through unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BindDef {
-  /// The unique identifier for this binding definition.
-  pub id: String,
+  /// Unique identifier for the binding. Only required if using `update`.
+  pub id: Option<String>,
   /// Resolved inputs (with BuildRef/BindRef converted to hashes).
   pub inputs: Option<BindInputs>,
   /// Named outputs from the binding (e.g., `{"path": "$${action:0}"}`).
@@ -139,7 +139,7 @@ mod tests {
 
     fn simple_def() -> BindDef {
       BindDef {
-        id: "test-bind".to_string(),
+        id: None,
         inputs: None,
         outputs: None,
         create_actions: vec![Action::Exec(ExecOpts {
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn hash_changes_when_action_order_differs() {
       let def1 = BindDef {
-        id: "test-bind".to_string(),
+        id: None,
         inputs: None,
         outputs: None,
         create_actions: vec![
@@ -227,7 +227,7 @@ mod tests {
       };
 
       let def2 = BindDef {
-        id: "test-bind".to_string(),
+        id: None,
         inputs: None,
         outputs: None,
         create_actions: vec![
@@ -257,7 +257,7 @@ mod tests {
       env.insert("HOME".to_string(), "/home/user".to_string());
 
       let def = BindDef {
-        id: "test-bind".to_string(),
+        id: Some("test-bind".to_string()),
         inputs: Some(BindInputs::String("test".to_string())),
         outputs: Some(BTreeMap::from([("link".to_string(), "$${action:0}".to_string())])),
         create_actions: vec![Action::Exec(ExecOpts {

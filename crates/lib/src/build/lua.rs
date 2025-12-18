@@ -132,7 +132,7 @@ pub fn build_hash_to_lua(lua: &Lua, hash: &ObjectHash, manifest: &Manifest) -> L
     .ok_or_else(|| LuaError::external(format!("build not found in manifest: {}", hash.0)))?;
 
   let table = lua.create_table()?;
-  table.set("id", build_def.id.as_str())?;
+  table.set("id", build_def.id.as_deref())?;
   table.set("hash", hash.0.as_str())?;
 
   // Generate placeholder outputs from BuildDef
@@ -166,9 +166,7 @@ pub fn build_hash_to_lua(lua: &Lua, hash: &ObjectHash, manifest: &Manifest) -> L
 pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<Manifest>>) -> LuaResult<()> {
   let build_fn = lua.create_function(move |lua, spec_table: LuaTable| {
     // 1. Parse the BuildSpec from the Lua table
-    let id: String = spec_table
-      .get("id")
-      .map_err(|_| LuaError::external("build spec requires 'id' field"))?;
+    let id: Option<String> = spec_table.get("id")?;
 
     let create_fn: LuaFunction = spec_table
       .get("create")
@@ -225,13 +223,12 @@ pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<
 
     // 5. Extract actions from ActionCtx
     let ctx: ActionCtx = ctx_userdata.take()?;
-    let create_actions = ctx.into_actions();
 
     // 6. Create BuildDef
     let build_def = BuildDef {
       id: id.clone(),
       inputs: resolved_inputs.clone(),
-      create_actions,
+      create_actions: ctx.into_actions(),
       outputs: Some(outputs.clone()),
     };
 
@@ -246,7 +243,7 @@ pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<
       if manifest.builds.contains_key(&hash) {
         tracing::warn!(
           hash = %hash.0,
-          id = %id,
+          id = ?id,
           "duplicate build detected, skipping insertion"
         );
       } else {
@@ -256,7 +253,7 @@ pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<
 
     // 9. Create and return BuildRef as Lua table
     let ref_table = lua.create_table()?;
-    ref_table.set("id", id.as_str())?;
+    ref_table.set("id", id.as_deref())?;
     ref_table.set("hash", hash.0.as_str())?;
 
     // Add inputs to ref (nil if not specified)
@@ -345,7 +342,7 @@ mod tests {
       let manifest = manifest.borrow();
       assert_eq!(manifest.builds.len(), 1);
       let (_, build_def) = manifest.builds.iter().next().unwrap();
-      assert_eq!(build_def.id, "test-pkg");
+      assert_eq!(build_def.id, Some("test-pkg".to_string()));
 
       Ok(())
     }
@@ -456,7 +453,11 @@ mod tests {
 
       // Check the consumer's inputs contain the ObjectHash
       // The consumer is the one with id = "consumer"
-      let consumer = manifest.builds.values().find(|b| b.id == "consumer").unwrap();
+      let consumer = manifest
+        .builds
+        .values()
+        .find(|b| b.id == Some("consumer".to_string()))
+        .unwrap();
       let inputs = consumer.inputs.as_ref().expect("should have inputs");
       match inputs {
         BuildInputs::Table(map) => {
@@ -473,29 +474,6 @@ mod tests {
         }
         _ => panic!("expected Table inputs"),
       }
-
-      Ok(())
-    }
-
-    #[test]
-    fn build_without_id_fails() -> LuaResult<()> {
-      let (lua, _) = create_test_lua_with_manifest()?;
-
-      let result = lua
-        .load(
-          r#"
-                return sys.build({
-                    create = function(inputs, ctx)
-                        return { out = "/output" }
-                    end,
-                })
-            "#,
-        )
-        .eval::<LuaTable>();
-
-      assert!(result.is_err());
-      let err = result.unwrap_err().to_string();
-      assert!(err.contains("id"), "error should mention 'id': {}", err);
 
       Ok(())
     }
@@ -591,10 +569,10 @@ mod tests {
       assert_eq!(manifest.builds.len(), 3);
 
       // Check all names are present (order in BTreeMap is by hash, not insertion order)
-      let ids: Vec<_> = manifest.builds.values().map(|b| b.id.as_str()).collect();
-      assert!(ids.contains(&"pkg1"));
-      assert!(ids.contains(&"pkg2"));
-      assert!(ids.contains(&"pkg3"));
+      let ids: Vec<_> = manifest.builds.values().map(|b| b.id.as_deref()).collect();
+      assert!(ids.contains(&Some("pkg1")));
+      assert!(ids.contains(&Some("pkg2")));
+      assert!(ids.contains(&Some("pkg3")));
 
       Ok(())
     }

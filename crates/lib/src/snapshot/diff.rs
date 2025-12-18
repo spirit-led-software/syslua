@@ -4,7 +4,7 @@
 //! current state, determining what builds need to be realized and what
 //! binds need to be applied or destroyed.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::build::store::build_dir_name;
@@ -31,12 +31,19 @@ pub struct StateDiff {
 
   /// Binds unchanged (same hash in both).
   pub binds_unchanged: Vec<ObjectHash>,
+
+  /// Binds to update: (old_hash, new_hash) pairs where id matches but content changed
+  /// and the new bind has update_actions defined.
+  pub binds_to_update: Vec<(ObjectHash, ObjectHash)>,
 }
 
 impl StateDiff {
   /// Returns true if there are no changes to make.
   pub fn is_empty(&self) -> bool {
-    self.builds_to_realize.is_empty() && self.binds_to_apply.is_empty() && self.binds_to_destroy.is_empty()
+    self.builds_to_realize.is_empty()
+      && self.binds_to_apply.is_empty()
+      && self.binds_to_destroy.is_empty()
+      && self.binds_to_update.is_empty()
   }
 
   /// Returns the total number of builds in the desired manifest.
@@ -46,7 +53,7 @@ impl StateDiff {
 
   /// Returns the total number of binds in the desired manifest.
   pub fn total_binds(&self) -> usize {
-    self.binds_to_apply.len() + self.binds_unchanged.len()
+    self.binds_to_apply.len() + self.binds_unchanged.len() + self.binds_to_update.len()
   }
 }
 
@@ -70,18 +77,23 @@ impl StateDiff {
 ///
 /// # Bind Diff Logic
 ///
-/// - Binds in desired but not in current → `binds_to_apply`
-/// - Binds in current but not in desired → `binds_to_destroy`
-/// - Binds in both (same hash) → `binds_unchanged`
+/// For binds with IDs:
+/// - Same ID + same hash → `binds_unchanged`
+/// - Same ID + different hash + has update_actions → `binds_to_update`
+/// - Same ID + different hash + no update_actions → `binds_to_destroy` + `binds_to_apply`
+/// - ID only in desired → `binds_to_apply`
+/// - ID only in current → `binds_to_destroy`
 ///
-/// Note: If a bind's hash changes (modified definition), the old bind is destroyed
-/// and the new one is applied. This is handled by the set difference logic.
+/// For binds without IDs (hash-only identity):
+/// - Hash in both → `binds_unchanged`
+/// - Hash only in desired → `binds_to_apply`
+/// - Hash only in current → `binds_to_destroy`
 pub fn compute_diff(desired: &Manifest, current: Option<&Manifest>, store_path: &Path) -> StateDiff {
   let mut diff = StateDiff::default();
 
   // Compute build diff
-  for (hash, build_def) in &desired.builds {
-    if build_exists_in_store(&build_def.id, hash, store_path) {
+  for hash in desired.builds.keys() {
+    if build_exists_in_store(hash, store_path) {
       diff.builds_cached.push(hash.clone());
     } else {
       diff.builds_to_realize.push(hash.clone());
@@ -89,30 +101,94 @@ pub fn compute_diff(desired: &Manifest, current: Option<&Manifest>, store_path: 
   }
 
   // Compute bind diff
-  let desired_binds: HashSet<&ObjectHash> = desired.bindings.keys().collect();
-  let current_binds: HashSet<&ObjectHash> = current.map(|m| m.bindings.keys().collect()).unwrap_or_default();
+  // First, build ID -> hash maps for binds with IDs
+  let mut desired_by_id: HashMap<&String, &ObjectHash> = HashMap::new();
+  let mut desired_without_id: HashSet<&ObjectHash> = HashSet::new();
 
-  // Binds to apply: in desired but not in current
-  for hash in desired_binds.difference(&current_binds) {
-    diff.binds_to_apply.push((*hash).clone());
+  for (hash, bind_def) in &desired.bindings {
+    if let Some(ref id) = bind_def.id {
+      desired_by_id.insert(id, hash);
+    } else {
+      desired_without_id.insert(hash);
+    }
   }
 
-  // Binds to destroy: in current but not in desired
-  for hash in current_binds.difference(&desired_binds) {
-    diff.binds_to_destroy.push((*hash).clone());
+  let mut current_by_id: HashMap<&String, &ObjectHash> = HashMap::new();
+  let mut current_without_id: HashSet<&ObjectHash> = HashSet::new();
+
+  if let Some(current_manifest) = current {
+    for (hash, bind_def) in &current_manifest.bindings {
+      if let Some(ref id) = bind_def.id {
+        current_by_id.insert(id, hash);
+      } else {
+        current_without_id.insert(hash);
+      }
+    }
   }
 
-  // Binds unchanged: in both
-  for hash in desired_binds.intersection(&current_binds) {
-    diff.binds_unchanged.push((*hash).clone());
+  // Track which hashes we've already processed via ID-based logic
+  let mut processed_desired: HashSet<&ObjectHash> = HashSet::new();
+  let mut processed_current: HashSet<&ObjectHash> = HashSet::new();
+
+  // Process binds with IDs
+  for (id, desired_hash) in &desired_by_id {
+    processed_desired.insert(*desired_hash);
+
+    if let Some(current_hash) = current_by_id.get(*id) {
+      processed_current.insert(*current_hash);
+
+      if desired_hash == current_hash {
+        // Same hash - unchanged
+        diff.binds_unchanged.push((*desired_hash).clone());
+      } else {
+        // Different hash - check if update is possible
+        let desired_bind = desired.bindings.get(*desired_hash).unwrap();
+        if desired_bind.update_actions.is_some() {
+          // Update path
+          diff
+            .binds_to_update
+            .push(((*current_hash).clone(), (*desired_hash).clone()));
+        } else {
+          // No update - destroy old + apply new
+          diff.binds_to_destroy.push((*current_hash).clone());
+          diff.binds_to_apply.push((*desired_hash).clone());
+        }
+      }
+    } else {
+      // ID only in desired - new bind
+      diff.binds_to_apply.push((*desired_hash).clone());
+    }
+  }
+
+  // IDs only in current (removed)
+  for (id, current_hash) in &current_by_id {
+    if !desired_by_id.contains_key(*id) {
+      processed_current.insert(*current_hash);
+      diff.binds_to_destroy.push((*current_hash).clone());
+    }
+  }
+
+  // Process binds without IDs (hash-only identity)
+  for hash in &desired_without_id {
+    if current_without_id.contains(hash) {
+      diff.binds_unchanged.push((*hash).clone());
+    } else {
+      diff.binds_to_apply.push((*hash).clone());
+    }
+  }
+
+  for hash in &current_without_id {
+    if !desired_without_id.contains(hash) {
+      diff.binds_to_destroy.push((*hash).clone());
+    }
   }
 
   diff
 }
 
 /// Check if a build's output directory exists in the store.
-fn build_exists_in_store(id: &str, hash: &ObjectHash, store_path: &Path) -> bool {
-  let dir_name = build_dir_name(id, hash);
+fn build_exists_in_store(hash: &ObjectHash, store_path: &Path) -> bool {
+  let dir_name = build_dir_name(hash);
   let build_path = store_path.join("obj").join(dir_name);
   build_path.exists()
 }
@@ -126,7 +202,7 @@ mod tests {
 
   fn make_build_def(id: &str) -> BuildDef {
     BuildDef {
-      id: id.to_string(),
+      id: Some(id.to_string()),
       inputs: None,
       create_actions: vec![],
       outputs: None,
@@ -135,7 +211,37 @@ mod tests {
 
   fn make_bind_def(id: &str) -> BindDef {
     BindDef {
-      id: id.to_string(),
+      id: Some(id.to_string()),
+      inputs: None,
+      outputs: None,
+      create_actions: vec![],
+      update_actions: None,
+      destroy_actions: vec![],
+    }
+  }
+
+  fn make_bind_def_with_update(id: &str) -> BindDef {
+    use crate::action::Action;
+    use crate::action::actions::exec::ExecOpts;
+
+    BindDef {
+      id: Some(id.to_string()),
+      inputs: None,
+      outputs: None,
+      create_actions: vec![],
+      update_actions: Some(vec![Action::Exec(ExecOpts {
+        bin: "echo".to_string(),
+        args: Some(vec!["update".to_string()]),
+        env: None,
+        cwd: None,
+      })]),
+      destroy_actions: vec![],
+    }
+  }
+
+  fn make_bind_def_without_id() -> BindDef {
+    BindDef {
+      id: None,
       inputs: None,
       outputs: None,
       create_actions: vec![],
@@ -183,7 +289,7 @@ mod tests {
 
     // Create the build directory to simulate cached build
     let build_hash = ObjectHash("abc123def45678901234".to_string());
-    let build_dir = temp_dir.path().join("obj").join("pkg1-abc123def45678901234");
+    let build_dir = temp_dir.path().join("obj").join("abc123def45678901234");
     std::fs::create_dir_all(&build_dir).unwrap();
 
     let mut desired = Manifest::default();
@@ -202,7 +308,7 @@ mod tests {
 
     // Create cached build
     let build_hash = ObjectHash("abc123def45678901234".to_string());
-    let build_dir = temp_dir.path().join("obj").join("pkg1-abc123def45678901234");
+    let build_dir = temp_dir.path().join("obj").join("abc123def45678901234");
     std::fs::create_dir_all(&build_dir).unwrap();
 
     let bind_hash = ObjectHash("bind1".to_string());
@@ -294,7 +400,7 @@ mod tests {
     let temp_dir = TempDir::new().unwrap();
 
     // Create some cached builds
-    std::fs::create_dir_all(temp_dir.path().join("obj/cached-abc123def45678901234")).unwrap();
+    std::fs::create_dir_all(temp_dir.path().join("obj/abc123def45678901234")).unwrap();
 
     let mut current = Manifest::default();
     current
@@ -409,7 +515,7 @@ mod tests {
 
     // Base build (no deps), version 1.0.0
     let base_v1 = BuildDef {
-      id: "base1".to_string(),
+      id: Some("base1".to_string()),
       inputs: None,
       create_actions: vec![],
       outputs: None,
@@ -418,7 +524,7 @@ mod tests {
 
     // Base build with different version
     let base_v2 = BuildDef {
-      id: "base2".to_string(),
+      id: Some("base2".to_string()),
       inputs: None,
       create_actions: vec![],
       outputs: None,
@@ -433,7 +539,7 @@ mod tests {
 
     // Dependent build referencing v1
     let dependent_on_v1 = BuildDef {
-      id: "dependent1".to_string(),
+      id: Some("dependent1".to_string()),
       inputs: Some(BuildInputs::Build(base_v1_hash.clone())),
       create_actions: vec![],
       outputs: None,
@@ -442,7 +548,7 @@ mod tests {
 
     // Same dependent build referencing v2
     let dependent_on_v2 = BuildDef {
-      id: "dependent2".to_string(),
+      id: Some("dependent2".to_string()),
       inputs: Some(BuildInputs::Build(base_v2_hash.clone())),
       create_actions: vec![],
       outputs: None,
@@ -466,7 +572,7 @@ mod tests {
 
     // Create build with version 1.0.0
     let build_v1 = BuildDef {
-      id: "pkg".to_string(),
+      id: Some("pkg-v1".to_string()),
       inputs: None,
       create_actions: vec![],
       outputs: None,
@@ -483,7 +589,7 @@ mod tests {
 
     // Desired manifest has v2
     let build_v2 = BuildDef {
-      id: "pkg".to_string(),
+      id: Some("pkg-v2".to_string()),
       inputs: None,
       create_actions: vec![],
       outputs: None,
@@ -509,7 +615,7 @@ mod tests {
 
     // Build with one action
     let build_action1 = BuildDef {
-      id: "pkg".to_string(),
+      id: Some("pkg".to_string()),
       inputs: None,
       create_actions: vec![Action::Exec(ExecOpts {
         bin: "echo".to_string(),
@@ -523,7 +629,7 @@ mod tests {
 
     // Build with different action
     let build_action2 = BuildDef {
-      id: "pkg".to_string(),
+      id: Some("pkg".to_string()),
       inputs: None,
       create_actions: vec![Action::Exec(ExecOpts {
         bin: "echo".to_string(),
@@ -547,7 +653,7 @@ mod tests {
 
     // Build with input "foo"
     let build_input1 = BuildDef {
-      id: "pkg".to_string(),
+      id: Some("pkg".to_string()),
       inputs: Some(BuildInputs::String("foo".to_string())),
       create_actions: vec![],
       outputs: None,
@@ -556,7 +662,7 @@ mod tests {
 
     // Build with input "bar"
     let build_input2 = BuildDef {
-      id: "pkg".to_string(),
+      id: Some("pkg".to_string()),
       inputs: Some(BuildInputs::String("bar".to_string())),
       create_actions: vec![],
       outputs: None,
@@ -564,5 +670,166 @@ mod tests {
     let hash2 = build_input2.compute_hash().unwrap();
 
     assert_ne!(hash1, hash2, "Changing inputs should produce different hash");
+  }
+
+  // Update lifecycle tests
+
+  #[test]
+  fn diff_updated_bind_with_update_actions() {
+    // When a bind with ID changes hash and has update_actions,
+    // it should go to binds_to_update
+    let temp_dir = TempDir::new().unwrap();
+
+    let mut current = Manifest::default();
+    current
+      .bindings
+      .insert(ObjectHash("old_hash".to_string()), make_bind_def("my-bind"));
+
+    let mut desired = Manifest::default();
+    desired
+      .bindings
+      .insert(ObjectHash("new_hash".to_string()), make_bind_def_with_update("my-bind"));
+
+    let diff = compute_diff(&desired, Some(&current), temp_dir.path());
+
+    assert_eq!(diff.binds_to_update.len(), 1);
+    assert_eq!(diff.binds_to_update[0].0, ObjectHash("old_hash".to_string()));
+    assert_eq!(diff.binds_to_update[0].1, ObjectHash("new_hash".to_string()));
+    assert_eq!(diff.binds_to_apply.len(), 0);
+    assert_eq!(diff.binds_to_destroy.len(), 0);
+  }
+
+  #[test]
+  fn diff_updated_bind_without_update_actions_uses_destroy_create() {
+    // When a bind with ID changes hash but has no update_actions,
+    // it should go to destroy + apply
+    let temp_dir = TempDir::new().unwrap();
+
+    let mut current = Manifest::default();
+    current
+      .bindings
+      .insert(ObjectHash("old_hash".to_string()), make_bind_def("my-bind"));
+
+    let mut desired = Manifest::default();
+    // Same ID but no update_actions
+    desired
+      .bindings
+      .insert(ObjectHash("new_hash".to_string()), make_bind_def("my-bind"));
+
+    let diff = compute_diff(&desired, Some(&current), temp_dir.path());
+
+    assert_eq!(diff.binds_to_update.len(), 0);
+    assert_eq!(diff.binds_to_destroy.len(), 1);
+    assert!(diff.binds_to_destroy.contains(&ObjectHash("old_hash".to_string())));
+    assert_eq!(diff.binds_to_apply.len(), 1);
+    assert!(diff.binds_to_apply.contains(&ObjectHash("new_hash".to_string())));
+  }
+
+  #[test]
+  fn diff_bind_without_id_changed_uses_destroy_create() {
+    // Binds without ID always use destroy + create, never update
+    let temp_dir = TempDir::new().unwrap();
+
+    let mut current = Manifest::default();
+    current
+      .bindings
+      .insert(ObjectHash("old_hash".to_string()), make_bind_def_without_id());
+
+    let mut desired = Manifest::default();
+    desired
+      .bindings
+      .insert(ObjectHash("new_hash".to_string()), make_bind_def_without_id());
+
+    let diff = compute_diff(&desired, Some(&current), temp_dir.path());
+
+    // No update path for binds without ID
+    assert_eq!(diff.binds_to_update.len(), 0);
+    assert_eq!(diff.binds_to_destroy.len(), 1);
+    assert_eq!(diff.binds_to_apply.len(), 1);
+  }
+
+  #[test]
+  fn diff_is_empty_with_only_updates_returns_false() {
+    // Binds to update should make is_empty() return false
+    let diff = StateDiff {
+      binds_to_update: vec![(ObjectHash("old".to_string()), ObjectHash("new".to_string()))],
+      ..Default::default()
+    };
+    assert!(!diff.is_empty());
+  }
+
+  #[test]
+  fn diff_new_bind_with_update_actions_goes_to_apply() {
+    // A new bind (ID not in current) should go to apply, not update
+    let temp_dir = TempDir::new().unwrap();
+
+    let current = Manifest::default(); // Empty
+
+    let mut desired = Manifest::default();
+    desired
+      .bindings
+      .insert(ObjectHash("new_hash".to_string()), make_bind_def_with_update("my-bind"));
+
+    let diff = compute_diff(&desired, Some(&current), temp_dir.path());
+
+    assert_eq!(diff.binds_to_update.len(), 0);
+    assert_eq!(diff.binds_to_apply.len(), 1);
+    assert!(diff.binds_to_apply.contains(&ObjectHash("new_hash".to_string())));
+  }
+
+  #[test]
+  fn diff_removed_bind_goes_to_destroy() {
+    // A bind that's in current but not in desired should go to destroy
+    let temp_dir = TempDir::new().unwrap();
+
+    let mut current = Manifest::default();
+    current
+      .bindings
+      .insert(ObjectHash("old_hash".to_string()), make_bind_def("my-bind"));
+
+    let desired = Manifest::default(); // Empty
+
+    let diff = compute_diff(&desired, Some(&current), temp_dir.path());
+
+    assert_eq!(diff.binds_to_update.len(), 0);
+    assert_eq!(diff.binds_to_apply.len(), 0);
+    assert_eq!(diff.binds_to_destroy.len(), 1);
+    assert!(diff.binds_to_destroy.contains(&ObjectHash("old_hash".to_string())));
+  }
+
+  #[test]
+  fn diff_same_id_same_hash_is_unchanged() {
+    // Same ID and same hash should be unchanged
+    let temp_dir = TempDir::new().unwrap();
+
+    let mut current = Manifest::default();
+    current
+      .bindings
+      .insert(ObjectHash("same_hash".to_string()), make_bind_def("my-bind"));
+
+    let mut desired = Manifest::default();
+    desired
+      .bindings
+      .insert(ObjectHash("same_hash".to_string()), make_bind_def("my-bind"));
+
+    let diff = compute_diff(&desired, Some(&current), temp_dir.path());
+
+    assert_eq!(diff.binds_to_update.len(), 0);
+    assert_eq!(diff.binds_to_apply.len(), 0);
+    assert_eq!(diff.binds_to_destroy.len(), 0);
+    assert_eq!(diff.binds_unchanged.len(), 1);
+  }
+
+  #[test]
+  fn diff_total_binds_includes_updates() {
+    // total_binds should count binds being updated
+    let diff = StateDiff {
+      binds_to_apply: vec![ObjectHash("a".to_string())],
+      binds_unchanged: vec![ObjectHash("b".to_string())],
+      binds_to_update: vec![(ObjectHash("c_old".to_string()), ObjectHash("c_new".to_string()))],
+      ..Default::default()
+    };
+
+    assert_eq!(diff.total_binds(), 3);
   }
 }

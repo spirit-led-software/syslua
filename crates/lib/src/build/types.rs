@@ -101,8 +101,8 @@ pub enum BuildInputs {
 /// Shell variables like `$HOME` pass through unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BuildDef {
-  /// Human-readable identifier for the build. Does not need to be unique.
-  pub id: String,
+  /// Optional human-readable identifier for the build. Does not need to be unique.
+  pub id: Option<String>,
   /// Resolved inputs (with BuildRef/BindRef converted to hashes).
   pub inputs: Option<BuildInputs>,
   /// Named outputs from the build (e.g., `{"out": "$${action:2}", "bin": "..."}`).
@@ -124,7 +124,7 @@ mod tests {
 
     fn simple_def() -> BuildDef {
       BuildDef {
-        id: "ripgrep-15.1.0".to_string(),
+        id: Some("ripgrep-15.1.0".to_string()),
         inputs: None,
         create_actions: vec![Action::FetchUrl {
           url: "https://example.com/rg.tar.gz".to_string(),
@@ -156,7 +156,7 @@ mod tests {
       let def1 = simple_def();
 
       let mut def2 = simple_def();
-      def2.id = "fd".to_string();
+      def2.id = Some("fd".to_string());
 
       assert_ne!(def1.compute_hash().unwrap(), def2.compute_hash().unwrap());
     }
@@ -181,7 +181,7 @@ mod tests {
       // Action order matters for reproducibility - same actions in different
       // order should produce different hashes
       let def1 = BuildDef {
-        id: "test".to_string(),
+        id: Some("test".to_string()),
         inputs: None,
         create_actions: vec![
           Action::Exec(ExecOpts {
@@ -201,7 +201,7 @@ mod tests {
       };
 
       let def2 = BuildDef {
-        id: "test".to_string(),
+        id: Some("test".to_string()),
         inputs: None,
         create_actions: vec![
           Action::Exec(ExecOpts {
@@ -229,7 +229,7 @@ mod tests {
       env.insert("CC".to_string(), "gcc".to_string());
 
       let def = BuildDef {
-        id: "complex".to_string(),
+        id: Some("complex".to_string()),
         inputs: Some(BuildInputs::String("test".to_string())),
         create_actions: vec![
           Action::FetchUrl {

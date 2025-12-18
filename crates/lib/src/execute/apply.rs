@@ -7,11 +7,12 @@
 //! 2. Evaluate config to produce desired manifest
 //! 3. Compute diff between desired and current
 //! 4. Destroy removed binds
-//! 5. Realize new builds
-//! 6. Apply new binds
-//! 7. Save new snapshot
+//! 5. Update modified binds (same ID, different content)
+//! 6. Realize new builds
+//! 7. Apply new binds
+//! 8. Save new snapshot
 //!
-//! On failure, rolls back any applied binds from this run.
+//! On failure, rolls back any applied binds from this run (except updates).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -22,7 +23,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tracing::{debug, error, info, warn};
 
-use crate::bind::execute::{apply_bind, destroy_bind};
+use crate::bind::execute::{apply_bind, destroy_bind, update_bind};
 use crate::bind::state::{BindState, BindStateError, load_bind_state, remove_bind_state, save_bind_state};
 use crate::build::store::build_path;
 use crate::eval::{EvalError, evaluate_config};
@@ -50,6 +51,9 @@ pub struct ApplyResult {
 
   /// Number of binds that were destroyed (removed from previous state).
   pub binds_destroyed: usize,
+
+  /// Number of binds that were updated (same ID, different content).
+  pub binds_updated: usize,
 }
 
 /// Errors that can occur during apply.
@@ -89,6 +93,15 @@ pub enum ApplyError {
     hash: ObjectHash,
     #[source]
     source: Box<dyn std::error::Error + Send + Sync>,
+  },
+
+  /// Update phase failed.
+  #[error("failed to update bind {old_hash} -> {new_hash}: {source}")]
+  UpdateFailed {
+    old_hash: ObjectHash,
+    new_hash: ObjectHash,
+    #[source]
+    source: ExecuteError,
   },
 }
 
@@ -180,6 +193,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
     builds_to_realize = diff.builds_to_realize.len(),
     builds_cached = diff.builds_cached.len(),
     binds_to_apply = diff.binds_to_apply.len(),
+    binds_to_update = diff.binds_to_update.len(),
     binds_to_destroy = diff.binds_to_destroy.len(),
     binds_unchanged = diff.binds_unchanged.len(),
     "diff computed"
@@ -204,6 +218,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
       diff,
       execution: DagResult::default(),
       binds_destroyed: 0,
+      binds_updated: 0,
     });
   }
 
@@ -215,6 +230,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
       diff,
       execution: DagResult::default(),
       binds_destroyed: 0,
+      binds_updated: 0,
     });
   }
 
@@ -241,7 +257,16 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
     }
   };
 
-  // 5 & 6. Build execution manifest and execute (realize builds, apply binds)
+  // 5. Update modified binds (no rollback on failure - just fail with error)
+  let updated_hashes = update_modified_binds(
+    &diff.binds_to_update,
+    current_manifest,
+    &desired_manifest,
+    &options.execute,
+  )
+  .await?;
+
+  // 6 & 7. Build execution manifest and execute (realize builds, apply new binds)
   // Filter to only include builds that need realization and binds that need applying
   let execution_manifest = build_execution_manifest(&desired_manifest, &diff);
 
@@ -327,6 +352,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
     diff,
     execution: dag_result,
     binds_destroyed: destroyed_hashes.len(),
+    binds_updated: updated_hashes.len(),
   })
 }
 
@@ -458,6 +484,127 @@ fn cleanup_destroyed_bind_states(destroyed_hashes: &[ObjectHash], system: bool) 
   Ok(())
 }
 
+/// Update modified binds.
+///
+/// For each (old_hash, new_hash) pair in binds_to_update:
+/// 1. Load old bind state (outputs from previous apply)
+/// 2. Get new bind definition from desired manifest
+/// 3. Call update_bind()
+/// 4. On success: save new bind state, remove old state if hash changed
+/// 5. On failure: log error and return error (no rollback)
+///
+/// # Arguments
+///
+/// * `updates` - List of (old_hash, new_hash) pairs to update
+/// * `current` - Current manifest (to get old bind definitions if needed)
+/// * `desired` - Desired manifest (to get new bind definitions)
+/// * `config` - Execution configuration
+///
+/// # Returns
+///
+/// List of new hashes that were successfully updated.
+async fn update_modified_binds(
+  updates: &[(ObjectHash, ObjectHash)],
+  _current: Option<&Manifest>,
+  desired: &Manifest,
+  config: &ExecuteConfig,
+) -> Result<Vec<ObjectHash>, ApplyError> {
+  if updates.is_empty() {
+    return Ok(Vec::new());
+  }
+
+  info!(count = updates.len(), "updating modified binds");
+
+  let mut updated = Vec::new();
+
+  // Build resolver data for placeholder resolution during update
+  // We need access to builds and existing binds for placeholder resolution
+  let (completed_builds, completed_binds) = build_restore_resolver_data(desired, config.system)?;
+
+  for (old_hash, new_hash) in updates {
+    // Load old bind state (outputs from when it was originally applied)
+    let old_bind_state = match load_bind_state(old_hash, config.system) {
+      Ok(Some(state)) => state,
+      Ok(None) => {
+        error!(old_hash = %old_hash.0, "no bind state found for update, cannot proceed");
+        return Err(ApplyError::UpdateFailed {
+          old_hash: old_hash.clone(),
+          new_hash: new_hash.clone(),
+          source: ExecuteError::CmdFailed {
+            cmd: format!("load bind state for {}", old_hash.0),
+            code: None,
+          },
+        });
+      }
+      Err(e) => {
+        error!(old_hash = %old_hash.0, error = %e, "failed to load bind state for update");
+        return Err(ApplyError::UpdateFailed {
+          old_hash: old_hash.clone(),
+          new_hash: new_hash.clone(),
+          source: ExecuteError::CmdFailed {
+            cmd: format!("load bind state for {}", old_hash.0),
+            code: None,
+          },
+        });
+      }
+    };
+
+    // Get new bind definition from desired manifest
+    let new_bind_def = match desired.bindings.get(new_hash) {
+      Some(def) => def,
+      None => {
+        error!(new_hash = %new_hash.0, "bind definition not found in desired manifest");
+        return Err(ApplyError::UpdateFailed {
+          old_hash: old_hash.clone(),
+          new_hash: new_hash.clone(),
+          source: ExecuteError::CmdFailed {
+            cmd: format!("find bind definition for {}", new_hash.0),
+            code: None,
+          },
+        });
+      }
+    };
+
+    // Create resolver for update
+    let resolver = ExecutionResolver::new(&completed_builds, &completed_binds, desired, "/tmp", config.system);
+
+    // Create old bind result from saved state
+    let old_bind_result = BindResult {
+      outputs: old_bind_state.outputs.clone(),
+      action_results: vec![],
+    };
+
+    // Execute update
+    info!(old_hash = %old_hash.0, new_hash = %new_hash.0, "updating bind");
+    let update_result = match update_bind(old_hash, new_hash, new_bind_def, &old_bind_result, &resolver).await {
+      Ok(result) => result,
+      Err(e) => {
+        error!(old_hash = %old_hash.0, new_hash = %new_hash.0, error = %e, "failed to update bind");
+        return Err(ApplyError::UpdateFailed {
+          old_hash: old_hash.clone(),
+          new_hash: new_hash.clone(),
+          source: e,
+        });
+      }
+    };
+
+    // Save new bind state
+    let new_bind_state = BindState::new(update_result.outputs.clone());
+    save_bind_state(new_hash, &new_bind_state, config.system)?;
+
+    // Remove old bind state if hash changed
+    if old_hash != new_hash {
+      remove_bind_state(old_hash, config.system)?;
+    }
+
+    updated.push(new_hash.clone());
+    debug!(old_hash = %old_hash.0, new_hash = %new_hash.0, "bind updated");
+  }
+
+  info!(count = updated.len(), "update phase complete");
+  Ok(updated)
+}
+
 /// Build resolver data for restore operations.
 ///
 /// Loads bind state for all binds in the manifest (destroyed + unchanged)
@@ -472,7 +619,7 @@ fn build_restore_resolver_data(
 
   // Compute BuildResult for each build (just need store_path and outputs)
   for (hash, build_def) in &manifest.builds {
-    let store_path = build_path(&build_def.id, hash, system);
+    let store_path = build_path(hash, system);
 
     // Resolve outputs - for now use the definition's output patterns
     // In practice, builds in the store should have their outputs already resolved
@@ -676,7 +823,7 @@ mod tests {
     desired.builds.insert(
       ObjectHash("cached".to_string()),
       BuildDef {
-        id: "cached-pkg".to_string(),
+        id: None,
         inputs: None,
         create_actions: vec![],
         outputs: None,
@@ -685,7 +832,7 @@ mod tests {
     desired.builds.insert(
       ObjectHash("new".to_string()),
       BuildDef {
-        id: "new-pkg".to_string(),
+        id: None,
         inputs: None,
         create_actions: vec![],
         outputs: None,
@@ -696,7 +843,7 @@ mod tests {
     desired.bindings.insert(
       ObjectHash("new_bind".to_string()),
       BindDef {
-        id: "new-bind".to_string(),
+        id: None,
         inputs: None,
         outputs: None,
         create_actions: vec![],
@@ -707,7 +854,7 @@ mod tests {
     desired.bindings.insert(
       ObjectHash("unchanged_bind".to_string()),
       BindDef {
-        id: "unchanged-bind".to_string(),
+        id: None,
         inputs: None,
         outputs: None,
         create_actions: vec![],
@@ -722,6 +869,7 @@ mod tests {
       binds_to_apply: vec![ObjectHash("new_bind".to_string())],
       binds_to_destroy: vec![],
       binds_unchanged: vec![ObjectHash("unchanged_bind".to_string())],
+      binds_to_update: vec![],
     };
 
     let exec_manifest = build_execution_manifest(&desired, &diff);
@@ -840,7 +988,7 @@ mod tests {
       manifest.builds.insert(
         ObjectHash("build123".to_string()),
         BuildDef {
-          id: "test-pkg".to_string(),
+          id: None,
           inputs: None,
           create_actions: vec![],
           outputs: None,
@@ -854,8 +1002,6 @@ mod tests {
       assert!(builds.contains_key(&ObjectHash("build123".to_string())));
 
       let build_result = builds.get(&ObjectHash("build123".to_string())).unwrap();
-      // Store path should contain the package name and hash
-      assert!(build_result.store_path.to_string_lossy().contains("test-pkg"));
       // Should have "out" output
       assert!(build_result.outputs.contains_key("out"));
 
@@ -883,7 +1029,7 @@ mod tests {
       manifest.bindings.insert(
         hash.clone(),
         BindDef {
-          id: "test-bind".to_string(),
+          id: None,
           inputs: None,
           outputs: None,
           create_actions: vec![],
@@ -917,7 +1063,7 @@ mod tests {
       manifest.bindings.insert(
         hash.clone(),
         BindDef {
-          id: "test-bind-no-state".to_string(),
+          id: None,
           inputs: None,
           outputs: None,
           create_actions: vec![],
@@ -960,7 +1106,7 @@ mod tests {
       manifest.bindings.insert(
         hash.clone(),
         BindDef {
-          id: "bind-no-state".to_string(),
+          id: None,
           inputs: None,
           outputs: None,
           create_actions: vec![],
@@ -1022,5 +1168,100 @@ mod tests {
 
       assert!(result.is_ok());
     });
+  }
+
+  #[test]
+  #[serial]
+  fn update_modified_binds_returns_empty_for_empty_input() {
+    with_temp_env(|_temp_dir| {
+      let manifest = Manifest::default();
+      let config = ExecuteConfig::default();
+
+      let rt = tokio::runtime::Runtime::new().unwrap();
+      let result = rt.block_on(update_modified_binds(&[], None, &manifest, &config));
+
+      assert!(result.is_ok());
+      assert!(result.unwrap().is_empty());
+    });
+  }
+
+  #[test]
+  #[serial]
+  fn update_modified_binds_fails_without_old_state() {
+    use crate::bind::BindDef;
+
+    with_temp_env(|_temp_dir| {
+      let old_hash = ObjectHash("old_bind".to_string());
+      let new_hash = ObjectHash("new_bind".to_string());
+
+      // Create manifest with new bind but no old state
+      let mut manifest = Manifest::default();
+      manifest.bindings.insert(
+        new_hash.clone(),
+        BindDef {
+          id: Some("test-bind".to_string()),
+          inputs: None,
+          outputs: None,
+          create_actions: vec![],
+          update_actions: Some(vec![]),
+          destroy_actions: vec![],
+        },
+      );
+
+      let config = ExecuteConfig::default();
+      let rt = tokio::runtime::Runtime::new().unwrap();
+      let result = rt.block_on(update_modified_binds(
+        &[(old_hash.clone(), new_hash.clone())],
+        None,
+        &manifest,
+        &config,
+      ));
+
+      // Should fail because old bind state doesn't exist
+      assert!(matches!(result, Err(ApplyError::UpdateFailed { .. })));
+    });
+  }
+
+  #[test]
+  #[serial]
+  fn update_modified_binds_fails_without_new_bind_def() {
+    with_temp_env(|_temp_dir| {
+      let old_hash = ObjectHash("old_bind".to_string());
+      let new_hash = ObjectHash("new_bind".to_string());
+
+      // Create old state but no new bind in manifest
+      let state = BindState::new([("path".to_string(), "/old/path".to_string())].into_iter().collect());
+      save_bind_state(&old_hash, &state, false).unwrap();
+
+      let manifest = Manifest::default(); // No bindings!
+      let config = ExecuteConfig::default();
+
+      let rt = tokio::runtime::Runtime::new().unwrap();
+      let result = rt.block_on(update_modified_binds(
+        &[(old_hash.clone(), new_hash.clone())],
+        None,
+        &manifest,
+        &config,
+      ));
+
+      // Should fail because new bind definition doesn't exist
+      assert!(matches!(result, Err(ApplyError::UpdateFailed { .. })));
+    });
+  }
+
+  #[test]
+  #[serial]
+  fn apply_result_includes_updated_count() {
+    // Verify that ApplyResult has binds_updated field
+    let result = ApplyResult {
+      snapshot: Snapshot::new("test".to_string(), None, Manifest::default()),
+      diff: StateDiff::default(),
+      execution: DagResult::default(),
+      binds_destroyed: 3,
+      binds_updated: 5,
+    };
+
+    assert_eq!(result.binds_destroyed, 3);
+    assert_eq!(result.binds_updated, 5);
   }
 }

@@ -313,7 +313,7 @@ mod tests {
     assert!(manifest.bindings.is_empty());
 
     let build = manifest.builds.values().next().unwrap();
-    assert_eq!(build.id, "test");
+    assert_eq!(build.id, Some("test".to_string()));
     Ok(())
   }
 

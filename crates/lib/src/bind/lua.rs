@@ -180,15 +180,19 @@ pub fn bind_hash_to_lua(lua: &Lua, hash: &ObjectHash, manifest: &Manifest) -> Lu
 pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<Manifest>>) -> LuaResult<()> {
   let bind_fn = lua.create_function(move |lua, spec_table: LuaTable| {
     // 1. Parse the BindSpec from the Lua table
-    let id = spec_table
-      .get("id")
-      .map_err(|_| LuaError::external("bind spec requires 'id' field"))?;
+    let id: Option<String> = spec_table.get("id")?;
 
     let create_fn: LuaFunction = spec_table
       .get("create")
       .map_err(|_| LuaError::external("bind spec requires 'create' function"))?;
 
     let update_fn: Option<LuaFunction> = spec_table.get("update")?;
+
+    if update_fn.is_some() && id.is_none() {
+      return Err(LuaError::external(
+        "bind spec with 'update' function requires 'id' field",
+      ));
+    }
 
     let destroy_fn: LuaFunction = spec_table
       .get("destroy")
@@ -254,8 +258,50 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       let update_ctx = ActionCtx::new();
       let update_ctx_userdata = lua.create_userdata(update_ctx)?;
 
-      // Call: destroy(outputs, ctx) -> ignored
-      let _: LuaValue = update_fn.call((&outputs_arg, &inputs_arg, &update_ctx_userdata))?;
+      // Call: update(outputs, inputs, ctx) -> outputs (must match create's output keys)
+      let update_result: LuaValue = update_fn.call((&outputs_arg, &inputs_arg, &update_ctx_userdata))?;
+
+      // Validate update returns same output shape as create
+      match (&update_result, &outputs) {
+        (LuaValue::Table(update_table), Some(create_outputs)) => {
+          let update_outputs = parse_outputs(update_table.clone())?;
+          let create_keys: std::collections::HashSet<_> = create_outputs.keys().collect();
+          let update_keys: std::collections::HashSet<_> = update_outputs.keys().collect();
+
+          if create_keys != update_keys {
+            return Err(LuaError::external(format!(
+              "update must return same output keys as create. create: {:?}, update: {:?}",
+              create_keys, update_keys
+            )));
+          }
+        }
+        (LuaValue::Table(update_table), None) => {
+          let update_outputs = parse_outputs(update_table.clone())?;
+          if !update_outputs.is_empty() {
+            return Err(LuaError::external(format!(
+              "update returned outputs but create did not. update keys: {:?}",
+              update_outputs.keys().collect::<Vec<_>>()
+            )));
+          }
+        }
+        (LuaValue::Nil, Some(create_outputs)) => {
+          if !create_outputs.is_empty() {
+            return Err(LuaError::external(format!(
+              "update returned nil but create returned outputs. create keys: {:?}",
+              create_outputs.keys().collect::<Vec<_>>()
+            )));
+          }
+        }
+        (LuaValue::Nil, None) => {
+          // Both return nil/empty, that's fine
+        }
+        (other, _) => {
+          return Err(LuaError::external(format!(
+            "update must return a table of outputs or nil, got: {:?}",
+            other.type_name()
+          )));
+        }
+      }
 
       let update_ctx: ActionCtx = update_ctx_userdata.take()?;
       let update_actions = update_ctx.into_actions();
@@ -295,7 +341,23 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       .compute_hash()
       .map_err(|e| LuaError::external(format!("failed to compute bind hash: {}", e)))?;
 
-    // 9. Add to manifest (deduplicate by hash)
+    // 9. Check for duplicate bind IDs (only for binds with IDs)
+    if let Some(ref id) = bind_def.id {
+      let manifest_ref = manifest.borrow();
+      for (existing_hash, existing_def) in manifest_ref.bindings.iter() {
+        if let Some(ref existing_id) = existing_def.id
+          && existing_id == id
+          && *existing_hash != hash
+        {
+          return Err(LuaError::external(format!(
+            "duplicate bind id '{}': a bind with this id already exists (hash: {})",
+            id, existing_hash.0
+          )));
+        }
+      }
+    }
+
+    // 10. Add to manifest (deduplicate by hash)
     {
       let mut manifest = manifest.borrow_mut();
       if manifest.bindings.contains_key(&hash) {
@@ -308,7 +370,7 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       }
     }
 
-    // 10. Create and return BindRef as Lua table
+    // 11. Create and return BindRef as Lua table
     let ref_table = lua.create_table()?;
     ref_table.set("hash", hash.0.as_str())?;
 
@@ -954,6 +1016,254 @@ mod tests {
           panic!("expected Cmd action");
         }
       }
+
+      Ok(())
+    }
+
+    #[test]
+    fn duplicate_bind_id_with_different_content_fails() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                -- First bind with id "my-bind"
+                sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo first")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy first")
+                    end,
+                })
+                -- Second bind with same id but different content
+                sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo second")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy second")
+                    end,
+                })
+            "#,
+        )
+        .exec();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("duplicate bind id"),
+        "error should mention 'duplicate bind id': {}",
+        err
+      );
+      assert!(err.contains("my-bind"), "error should mention the id: {}", err);
+
+      Ok(())
+    }
+
+    #[test]
+    fn binds_without_id_can_have_different_content() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      // Two binds without IDs with different content should both be added
+      lua
+        .load(
+          r#"
+                sys.bind({
+                    create = function(inputs, ctx)
+                        ctx:exec("echo first")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy first")
+                    end,
+                })
+                sys.bind({
+                    create = function(inputs, ctx)
+                        ctx:exec("echo second")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy second")
+                    end,
+                })
+            "#,
+        )
+        .exec()?;
+
+      let manifest = manifest.borrow();
+      // Both binds should be added since they have no ID (no conflict possible)
+      assert_eq!(manifest.bindings.len(), 2);
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_with_different_output_keys_fails() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        return { path = "/some/path" }
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        return { different_key = "/other/path" }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("update must return same output keys as create"),
+        "error should mention output key mismatch: {}",
+        err
+      );
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_with_same_output_keys_succeeds() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        return { path = "/some/path" }
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        return { path = "/updated/path" }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>()?;
+
+      let manifest = manifest.borrow();
+      assert_eq!(manifest.bindings.len(), 1);
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_with_nil_return_when_create_has_no_outputs() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        -- no return (nil)
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        -- no return (nil)
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>()?;
+
+      let manifest = manifest.borrow();
+      assert_eq!(manifest.bindings.len(), 1);
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_returns_outputs_but_create_does_not_fails() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        -- no return
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        return { path = "/some/path" }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("update returned outputs but create did not"),
+        "error should mention create has no outputs: {}",
+        err
+      );
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_returns_nil_but_create_has_outputs_fails() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        return { path = "/some/path" }
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        -- no return (nil)
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("update returned nil but create returned outputs"),
+        "error should mention create has outputs: {}",
+        err
+      );
 
       Ok(())
     }

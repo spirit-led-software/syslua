@@ -606,7 +606,7 @@ mod tests {
   fn make_build(id: &str, inputs: Option<BuildInputs>) -> BuildDef {
     let (cmd, args) = echo_msg(id);
     BuildDef {
-      id: id.to_string(),
+      id: None,
       inputs,
       create_actions: vec![Action::Exec(ExecOpts {
         bin: cmd.to_string(),
@@ -782,7 +782,7 @@ mod tests {
     with_temp_store(|| async {
       let (cmd, args) = shell_cmd("exit 1");
       let build = BuildDef {
-        id: "failing".to_string(),
+        id: None,
         inputs: None,
         create_actions: vec![Action::Exec(ExecOpts {
           bin: cmd.to_string(),
@@ -814,7 +814,7 @@ mod tests {
       // A fails, B depends on A -> B should be skipped
       let (cmd, args) = shell_cmd("exit 1");
       let build_a = BuildDef {
-        id: "a".to_string(),
+        id: None,
         inputs: None,
         create_actions: vec![Action::Exec(ExecOpts {
           bin: cmd.to_string(),
@@ -894,7 +894,7 @@ mod tests {
   fn make_bind(id: &str, script: &str, inputs: Option<BindInputs>) -> BindDef {
     let (cmd, args) = shell_cmd(script);
     BindDef {
-      id: id.to_string(),
+      id: Some(id.to_string()),
       inputs,
       outputs: None,
       create_actions: vec![Action::Exec(ExecOpts {
@@ -972,7 +972,7 @@ mod tests {
       // Build that produces an output
       let (echo_cmd, echo_args) = shell_cmd("echo built");
       let build = BuildDef {
-        id: "provider".to_string(),
+        id: None,
         inputs: None,
         create_actions: vec![Action::Exec(ExecOpts {
           bin: echo_cmd.to_string(),
@@ -988,7 +988,7 @@ mod tests {
       // Using the full hash in the command to test placeholder resolution
       let (bind_cmd, bind_args) = shell_cmd(&format!("echo using $$${{build:{}:bin}}", build_hash.0));
       let bind = BindDef {
-        id: "consumer".to_string(),
+        id: None,
         inputs: Some(BindInputs::Build(build_hash.clone())),
         outputs: None,
         create_actions: vec![Action::Exec(ExecOpts {
@@ -1043,7 +1043,7 @@ mod tests {
 
       // Use platform-specific commands since PATH is isolated
       let bind_a = BindDef {
-        id: "bind_a".to_string(),
+        id: None,
         inputs: None,
         outputs: None,
         create_actions: vec![Action::Exec(ExecOpts {
@@ -1065,7 +1065,7 @@ mod tests {
       // Bind B depends on A and fails
       let (exit_cmd, exit_args) = shell_cmd("exit 1");
       let bind_b = BindDef {
-        id: "bind_b".to_string(),
+        id: None,
         inputs: Some(BindInputs::Bind(hash_a.clone())),
         outputs: None,
         create_actions: vec![Action::Exec(ExecOpts {
@@ -1123,7 +1123,7 @@ mod tests {
     // Build fails -> dependent bind should be skipped (not applied)
     with_temp_store(|| async {
       let build = BuildDef {
-        id: "failing-build".to_string(),
+        id: None,
         inputs: None,
         create_actions: vec![Action::Exec(ExecOpts {
           bin: "exit 1".to_string(),

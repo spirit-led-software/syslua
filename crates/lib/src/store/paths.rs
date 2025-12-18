@@ -43,11 +43,9 @@ impl StorePaths {
 #[cfg(test)]
 mod tests {
   use super::*;
-  use serial_test::serial;
   use temp_env::with_vars;
 
   #[test]
-  #[serial]
   fn env_var_overrides_default_paths() {
     with_vars(
       [
@@ -63,7 +61,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   #[cfg(not(windows))]
   fn default_system_store_at_root() {
     let path = StorePaths::default_system_store_path();
