@@ -7,7 +7,8 @@
 --- @return string
 local function sh(ctx, script)
   if sys.os == 'windows' then
-    return ctx:exec({ bin = 'cmd.exe', args = { '/c', script } })
+    local cmd = os.getenv('COMSPEC') or 'cmd.exe'
+    return ctx:exec({ bin = cmd, args = { '/c', script } })
   else
     return ctx:exec({
       bin = '/bin/sh',

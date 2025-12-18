@@ -157,7 +157,6 @@ mod tests {
   use crate::util::hash::ObjectHash;
 
   use super::*;
-  use serial_test::serial;
   use tempfile::TempDir;
 
   fn with_temp_store<F>(f: F)
@@ -176,7 +175,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn save_and_load_roundtrip() {
     with_temp_store(|_| {
       let hash = ObjectHash("abc123def456789012345678".to_string());
@@ -193,7 +191,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_nonexistent_returns_none() {
     with_temp_store(|_| {
       let hash = ObjectHash("nonexistent123456789012".to_string());
@@ -203,7 +200,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn remove_cleans_up_directory() {
     with_temp_store(|_| {
       let hash = ObjectHash("abc123def456789012345678".to_string());
@@ -220,7 +216,6 @@ mod tests {
   // Corrupt state handling tests
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_invalid_json() {
     with_temp_store(|_| {
       let hash = ObjectHash("corrupt_json_test123456".to_string());
@@ -246,7 +241,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_wrong_schema() {
     with_temp_store(|_| {
       let hash = ObjectHash("wrong_schema_test12345".to_string());
@@ -265,7 +259,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_empty_file() {
     with_temp_store(|_| {
       let hash = ObjectHash("empty_file_test1234567".to_string());
@@ -283,7 +276,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_null_json() {
     with_temp_store(|_| {
       let hash = ObjectHash("null_json_test12345678".to_string());
@@ -301,7 +293,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_array_instead_of_object() {
     with_temp_store(|_| {
       let hash = ObjectHash("array_json_test1234567".to_string());
@@ -319,7 +310,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_outputs_with_wrong_type() {
     with_temp_store(|_| {
       let hash = ObjectHash("wrong_output_type12345".to_string());

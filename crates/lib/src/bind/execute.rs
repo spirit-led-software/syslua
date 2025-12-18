@@ -384,7 +384,6 @@ mod tests {
   use super::*;
   use crate::util::testutil::{echo_msg, shell_cmd};
   use crate::{action::actions::exec::ExecOpts, placeholder::PlaceholderError, util::hash::Hashable};
-  use serial_test::serial;
 
   /// Simple test resolver that returns fixed values.
   struct TestResolver {
@@ -467,7 +466,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn apply_simple_bind() {
     let bind_def = make_simple_bind();
     let hash = bind_def.compute_hash().unwrap();
@@ -480,7 +478,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn apply_bind_with_outputs() {
     let (cmd, args) = echo_msg("/path/to/link");
     let bind_def = BindDef {
@@ -505,7 +502,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn apply_bind_with_out_placeholder() {
     let (cmd, args) = echo_msg("$${out}");
     let bind_def = BindDef {
@@ -538,7 +534,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn apply_bind_with_build_dependency() {
     let (cmd, args) = echo_msg("$${build:abc123:bin}");
     let bind_def = BindDef {
@@ -566,7 +561,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn destroy_bind_with_actions() {
     let (apply_cmd, apply_args) = echo_msg("applied");
     let (destroy_cmd, destroy_args) = echo_msg("destroyed");
@@ -605,7 +599,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn destroy_bind_without_actions() {
     let bind_def = make_simple_bind();
     let hash = bind_def.compute_hash().unwrap();
@@ -622,7 +615,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn apply_bind_action_failure() {
     let (cmd, args) = shell_cmd("exit 1");
     let bind_def = BindDef {
@@ -647,7 +639,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn apply_bind_multiple_actions() {
     let (cmd1, args1) = echo_msg("step1");
     let (cmd2, args2) = echo_msg("step2");
@@ -696,7 +687,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn update_bind_executes_update_actions() {
     let (create_cmd, create_args) = echo_msg("created");
     let (update_cmd, update_args) = echo_msg("updated");
@@ -743,7 +733,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn update_bind_returns_new_outputs() {
     let (create_cmd, create_args) = echo_msg("/old/path");
     let (update_cmd, update_args) = echo_msg("/new/path");
@@ -783,7 +772,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn update_bind_fails_without_update_actions() {
     let (cmd, args) = echo_msg("created");
     let bind_def = BindDef {
@@ -814,7 +802,6 @@ mod tests {
   }
 
   #[tokio::test]
-  #[serial]
   async fn update_bind_with_multiple_actions() {
     let (cmd1, args1) = echo_msg("step1");
     let (cmd2, args2) = echo_msg("step2");

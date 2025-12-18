@@ -416,7 +416,6 @@ mod tests {
     action::{Action, actions::exec::ExecOpts},
     util::hash::Hashable,
   };
-  use serial_test::serial;
   use tempfile::TempDir;
 
   fn make_simple_build() -> BuildDef {
@@ -461,7 +460,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn realize_simple_build() {
     with_temp_store(|| async {
       let build_def = make_simple_build();
@@ -493,7 +491,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn realize_build_with_custom_outputs() {
     with_temp_store(|| async {
       let (cmd, args) = echo_msg("/path/to/binary");
@@ -536,7 +533,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn realize_build_with_multiple_actions() {
     with_temp_store(|| async {
       let (cmd1, args1) = echo_msg("step1");
@@ -595,7 +591,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn realize_build_action_failure() {
     with_temp_store(|| async {
       let (cmd, args) = shell_cmd("exit 1");
@@ -650,7 +645,7 @@ mod tests {
   }
 
   #[test]
-  #[serial]
+
   fn successful_build_has_completion_marker() {
     with_temp_store(|| async {
       let build_def = make_simple_build();
@@ -678,7 +673,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn incomplete_build_triggers_rebuild() {
     with_temp_store(|| async {
       let build_def = make_simple_build();
@@ -813,7 +807,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn corrupted_build_triggers_full_rebuild() {
     with_temp_store(|| async {
       let build_def = make_simple_build();

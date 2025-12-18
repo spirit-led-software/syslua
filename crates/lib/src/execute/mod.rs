@@ -599,7 +599,6 @@ mod tests {
       testutil::{echo_msg, shell_cmd},
     },
   };
-  use serial_test::serial;
   use std::collections::BTreeMap;
   use tempfile::TempDir;
 
@@ -692,7 +691,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_empty_manifest() {
     with_temp_store(|| async {
       let manifest = Manifest::default();
@@ -706,7 +704,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_single_independent_build() {
     with_temp_store(|| async {
       let build = make_build("test", None);
@@ -725,7 +722,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_parallel_independent_builds() {
     with_temp_store(|| async {
       let build_a = make_build("a", None);
@@ -751,7 +747,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_dependent_builds() {
     with_temp_store(|| async {
       let build_a = make_build("a", None);
@@ -777,7 +772,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_failing_build() {
     with_temp_store(|| async {
       let (cmd, args) = shell_cmd("exit 1");
@@ -808,7 +802,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_skip_dependent_on_failure() {
     with_temp_store(|| async {
       // A fails, B depends on A -> B should be skipped
@@ -848,7 +841,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_diamond_dependency() {
     with_temp_store(|| async {
       //     A
@@ -909,7 +901,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_bind_after_build() {
     // Bind depends on build -> bind executes after build
     with_temp_store(|| async {
@@ -935,7 +926,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_bind_chain() {
     // Bind A -> Bind B -> Bind C (linear chain)
     with_temp_store(|| async {
@@ -965,7 +955,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_bind_placeholder_resolution() {
     // Bind uses $${build:hash:out} placeholder that should resolve to build output
     with_temp_store(|| async {
@@ -1021,7 +1010,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_bind_failure_rollback() {
     // Bind A succeeds, Bind B fails -> Bind A should be rolled back (destroyed)
     with_temp_store(|| async {
@@ -1118,7 +1106,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_build_failure_skips_binds() {
     // Build fails -> dependent bind should be skipped (not applied)
     with_temp_store(|| async {
@@ -1160,7 +1147,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_mixed_wave_execution() {
     // Independent builds and binds should run in parallel within a wave
     // Build A (no deps) and Bind X (no deps) can run together
@@ -1200,7 +1186,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_empty() {
     // Empty manifest should succeed with no nodes
     with_temp_store(|| async {
@@ -1217,7 +1202,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_only_binds() {
     // Manifest with only binds (no builds)
     with_temp_store(|| async {

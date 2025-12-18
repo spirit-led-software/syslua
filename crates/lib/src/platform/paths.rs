@@ -7,7 +7,7 @@ pub fn root_dir() -> PathBuf {
     return PathBuf::from(root);
   }
   let drive = std::env::var("SYSTEMDRIVE").expect("SYSTEMDRIVE not set");
-  PathBuf::from(drive).join(APP_NAME)
+  PathBuf::from(format!("{}\\", drive)).join(APP_NAME)
 }
 
 #[cfg(not(windows))]
