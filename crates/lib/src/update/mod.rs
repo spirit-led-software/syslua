@@ -196,7 +196,6 @@ mod tests {
   use tempfile::TempDir;
 
   mod find_config_path_tests {
-    #[cfg(not(windows))]
     use serial_test::serial;
 
     use super::*;
