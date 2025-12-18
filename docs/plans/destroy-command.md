@@ -30,9 +30,9 @@ The `sys destroy` command is currently a placeholder that only prints a message.
 
 ## Files to Modify
 
-| Path | Changes |
-|------|---------|
-| `crates/cli/src/cmd/destroy.rs` | Full implementation |
+| Path                            | Changes                                 |
+| ------------------------------- | --------------------------------------- |
+| `crates/cli/src/cmd/destroy.rs` | Full implementation                     |
 | `crates/lib/src/execute/mod.rs` | Add `destroy_all()` or similar function |
 
 ## Success Criteria
