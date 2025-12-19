@@ -29,11 +29,11 @@ pub fn create_test_runtime() -> LuaResult<(Lua, Rc<RefCell<Manifest>>)> {
   // Ensure lua/syslua is in package.path
   // The runtime adds ./lua/?.lua but tests run from different CWD
   let syslua_path = workspace_root().join("lua");
+  let syslua_path_str = syslua_path.display().to_string().replace('\\', "/");
   lua
     .load(format!(
       r#"package.path = package.path .. ";{}/?.lua;{}/?/init.lua""#,
-      syslua_path.display(),
-      syslua_path.display()
+      syslua_path_str, syslua_path_str
     ))
     .exec()?;
 
@@ -41,7 +41,6 @@ pub fn create_test_runtime() -> LuaResult<(Lua, Rc<RefCell<Manifest>>)> {
 }
 
 /// Get path to a fixture file.
-#[allow(dead_code)]
 pub fn fixture_path(name: &str) -> PathBuf {
   PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     .join("tests")
@@ -50,7 +49,6 @@ pub fn fixture_path(name: &str) -> PathBuf {
 }
 
 /// Get path to a test data file.
-#[allow(dead_code)]
 pub fn fixture_data_path(name: &str) -> PathBuf {
   PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     .join("tests")
