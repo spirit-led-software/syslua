@@ -8,10 +8,14 @@
 local function sh(ctx, script)
   if sys.os == 'windows' then
     local system_drive = os.getenv('SystemDrive') or 'C:'
-    local cmd = os.getenv('COMSPEC') or system_drive .. '\\Windows\\System32\\cmd.exe'
     return ctx:exec({
-      bin = cmd,
-      args = { '/c', script },
+      bin = 'powershell.exe',
+      args = {
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        script,
+      },
       env = { PATH = system_drive .. '\\Windows\\System32;' .. system_drive .. '\\Windows' },
     })
   else
@@ -31,7 +35,7 @@ return {
       id = 'data-1.0.0',
       create = function(_, ctx)
         if sys.os == 'windows' then
-          sh(ctx, 'echo DATA > ' .. ctx.out .. '\\data.txt')
+          sh(ctx, 'Set-Content -Path "' .. ctx.out .. '\\data.txt" -Value "DATA"')
         else
           sh(ctx, 'echo DATA > ' .. ctx.out .. '/data.txt')
         end
@@ -45,7 +49,7 @@ return {
       inputs = { data = data_build },
       create = function(inputs, ctx)
         if sys.os == 'windows' then
-          sh(ctx, 'type "' .. inputs.data.outputs.data_file .. '" > ' .. ctx.out .. '\\processed.txt')
+          sh(ctx, 'Get-Content -Path "' .. inputs.data.outputs.data_file .. '" | Set-Content -Path "' .. ctx.out .. '\\processed.txt"')
         else
           sh(ctx, 'cat ' .. inputs.data.outputs.data_file .. ' > ' .. ctx.out .. '/processed.txt')
         end

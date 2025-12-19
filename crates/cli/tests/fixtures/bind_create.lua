@@ -10,10 +10,14 @@ local TEST_DIR = os.getenv('TEST_OUTPUT_DIR') or '/tmp/syslua-test'
 local function sh(ctx, script)
   if sys.os == 'windows' then
     local system_drive = os.getenv('SystemDrive') or 'C:'
-    local cmd = os.getenv('COMSPEC') or system_drive .. '\\Windows\\System32\\cmd.exe'
     return ctx:exec({
-      bin = cmd,
-      args = { '/c', script },
+      bin = 'powershell.exe',
+      args = {
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        script,
+      },
       env = { PATH = system_drive .. '\\Windows\\System32;' .. system_drive .. '\\Windows' },
     })
   else
@@ -32,8 +36,8 @@ return {
       id = 'test-bind',
       create = function(_, ctx)
         if sys.os == 'windows' then
-          sh(ctx, 'if not exist "' .. TEST_DIR .. '" mkdir "' .. TEST_DIR .. '"')
-          sh(ctx, 'echo created > "' .. TEST_DIR .. '\\created.txt"')
+          sh(ctx, 'New-Item -ItemType Directory -Force -Path "' .. TEST_DIR .. '" | Out-Null')
+          sh(ctx, 'Set-Content -Path "' .. TEST_DIR .. '\\created.txt" -Value "created"')
         else
           sh(ctx, 'mkdir -p ' .. TEST_DIR)
           sh(ctx, 'echo created > ' .. TEST_DIR .. '/created.txt')
@@ -42,7 +46,7 @@ return {
       end,
       destroy = function(outputs, ctx)
         if sys.os == 'windows' then
-          sh(ctx, 'del /f "' .. outputs.file .. '" 2>nul')
+          sh(ctx, 'Remove-Item -Force -ErrorAction SilentlyContinue -Path "' .. outputs.file .. '"')
         else
           sh(ctx, 'rm -f ' .. outputs.file)
         end

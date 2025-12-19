@@ -8,10 +8,14 @@
 local function sh(ctx, script)
   if sys.os == 'windows' then
     local system_drive = os.getenv('SystemDrive') or 'C:'
-    local cmd = os.getenv('COMSPEC') or system_drive .. '\\Windows\\System32\\cmd.exe'
     return ctx:exec({
-      bin = cmd,
-      args = { '/c', script },
+      bin = 'powershell.exe',
+      args = {
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        script,
+      },
       env = { PATH = system_drive .. '\\Windows\\System32;' .. system_drive .. '\\Windows' },
     })
   else
@@ -30,8 +34,8 @@ return {
       id = 'hello-1.0.0',
       create = function(_, ctx)
         if sys.os == 'windows' then
-          sh(ctx, 'mkdir ' .. ctx.out .. '\\bin')
-          sh(ctx, 'echo @echo Hello > ' .. ctx.out .. '\\bin\\hello.cmd')
+          sh(ctx, 'New-Item -ItemType Directory -Force -Path "' .. ctx.out .. '\\bin" | Out-Null')
+          sh(ctx, 'Set-Content -Path "' .. ctx.out .. '\\bin\\hello.cmd" -Value "@echo Hello"')
         else
           sh(ctx, 'mkdir -p ' .. ctx.out .. '/bin')
           sh(ctx, 'printf "#!/bin/sh\\necho Hello\\n" > ' .. ctx.out .. '/bin/hello')

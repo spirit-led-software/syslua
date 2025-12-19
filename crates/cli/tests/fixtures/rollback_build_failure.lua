@@ -14,10 +14,14 @@ local TEST_DIR = os.getenv('TEST_OUTPUT_DIR') or '/tmp/syslua-test'
 local function sh(ctx, script)
   if sys.os == 'windows' then
     local system_drive = os.getenv('SystemDrive') or 'C:'
-    local cmd = os.getenv('COMSPEC') or system_drive .. '\\Windows\\System32\\cmd.exe'
     return ctx:exec({
-      bin = cmd,
-      args = { '/c', script },
+      bin = 'powershell.exe',
+      args = {
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        script,
+      },
       env = { PATH = system_drive .. '\\Windows\\System32;' .. system_drive .. '\\Windows' },
     })
   else
@@ -46,8 +50,8 @@ return {
       inputs = { build = build },
       create = function(_, ctx)
         if sys.os == 'windows' then
-          sh(ctx, 'if not exist "' .. TEST_DIR .. '" mkdir "' .. TEST_DIR .. '"')
-          sh(ctx, 'echo should not exist > "' .. TEST_DIR .. '\\should-not-exist.txt"')
+          sh(ctx, 'New-Item -ItemType Directory -Force -Path "' .. TEST_DIR .. '" | Out-Null')
+          sh(ctx, 'Set-Content -Path "' .. TEST_DIR .. '\\should-not-exist.txt" -Value "should not exist"')
         else
           sh(ctx, 'mkdir -p ' .. TEST_DIR)
           sh(ctx, 'touch ' .. TEST_DIR .. '/should-not-exist.txt')

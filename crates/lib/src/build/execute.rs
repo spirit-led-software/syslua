@@ -404,10 +404,8 @@ fn resolve_outputs_with_resolver(
 ) -> Result<HashMap<String, String>, ExecuteError> {
   let mut outputs = HashMap::new();
 
-  let canonical_store_path = std::fs::canonicalize(store_path)?;
-
   // Always include "out" pointing to the store path
-  outputs.insert("out".to_string(), canonical_store_path.to_string_lossy().to_string());
+  outputs.insert("out".to_string(), store_path.to_string_lossy().to_string());
 
   // Resolve user-defined outputs
   if let Some(def_outputs) = &build_def.outputs {
@@ -416,7 +414,7 @@ fn resolve_outputs_with_resolver(
       completed_builds,
       completed_binds,
       manifest,
-      canonical_store_path.to_string_lossy().to_string(),
+      store_path.to_string_lossy().to_string(),
       config.system,
     );
     for result in action_results {

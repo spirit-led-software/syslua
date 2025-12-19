@@ -8,10 +8,14 @@
 local function sh(ctx, script)
   if sys.os == 'windows' then
     local system_drive = os.getenv('SystemDrive') or 'C:'
-    local cmd = os.getenv('COMSPEC') or system_drive .. '\\Windows\\System32\\cmd.exe'
     return ctx:exec({
-      bin = cmd,
-      args = { '/c', script },
+      bin = 'powershell.exe',
+      args = {
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        script,
+      },
       env = { PATH = system_drive .. '\\Windows\\System32;' .. system_drive .. '\\Windows' },
     })
   else
@@ -31,7 +35,7 @@ return {
       create = function(_, ctx)
         -- Create a simple file in the output directory
         if sys.os == 'windows' then
-          sh(ctx, 'echo hello > ' .. ctx.out .. '\\hello.txt')
+          sh(ctx, 'Set-Content -Path "' .. ctx.out .. '\\hello.txt" -Value "hello"')
         else
           sh(ctx, 'echo hello > ' .. ctx.out .. '/hello.txt')
         end
