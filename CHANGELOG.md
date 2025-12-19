@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-12-19
+
+### Miscellaneous
+
+- CI by @ian-pascoe
+
+### Refactoring
+
+- Bind update lifecycle (#4) by @ian-pascoe in [#4](https://github.com/spirit-led-software/syslua/pull/4)
+
+
+
+**Full Changelog**: https://github.com/spirit-led-software/syslua/compare/v0.1.0...v0.2.0
 ## [0.1.0] - 2025-12-18
 
 ### Bug Fixes
@@ -51,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Miscellaneous
 
+- Release v0.1.0 by @syslua-bot[bot] in [#3](https://github.com/spirit-led-software/syslua/pull/3)
 - Reset changelog to remove test releases by @ian-pascoe
 - Release v0.1.1 by @github-actions[bot] in [#2](https://github.com/spirit-led-software/syslua/pull/2)
 - Release v0.1.0 (#1) by @github-actions[bot] in [#1](https://github.com/spirit-led-software/syslua/pull/1)
@@ -65,6 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - License by @ian-pascoe
 
 ### New Contributors
+* @syslua-bot[bot] made their first contribution in [#3](https://github.com/spirit-led-software/syslua/pull/3)
 * @ian-pascoe made their first contribution
 * @github-actions[bot] made their first contribution in [#2](https://github.com/spirit-led-software/syslua/pull/2)
 
