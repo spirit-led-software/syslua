@@ -192,11 +192,12 @@ pub fn update_inputs(config_path: &Path, options: &UpdateOptions) -> Result<Upda
 #[cfg(test)]
 mod tests {
   use super::*;
-  use serial_test::serial;
   use std::fs;
   use tempfile::TempDir;
 
   mod find_config_path_tests {
+    use serial_test::serial;
+
     use super::*;
 
     #[test]
@@ -218,7 +219,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn cwd_fallback() {
       let temp = TempDir::new().unwrap();
       let config_path = temp.path().join("init.lua");
@@ -296,6 +296,8 @@ mod tests {
   }
 
   mod update_inputs_tests {
+    use serial_test::serial;
+
     use super::*;
 
     #[test]

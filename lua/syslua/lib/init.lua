@@ -32,15 +32,12 @@ function M.fetch_url(opts)
     error("fetch_url requires a 'sha256' option")
   end
 
-  local basename = sys.path.basename(opts.url)
-
   return sys.build({
-    name = 'fetch-' .. basename,
     inputs = {
       url = opts.url,
       sha256 = opts.sha256,
     },
-    apply = function(inputs, ctx)
+    create = function(inputs, ctx)
       local result = ctx:fetch_url(inputs.url, inputs.sha256)
       return {
         out = result,

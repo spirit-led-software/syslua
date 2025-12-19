@@ -17,7 +17,7 @@
 //! {
 //!   "outputs": {
 //!     "link": "/home/user/.config/nvim/init.lua",
-//!     "target": "/syslua/store/obj/nvim-config-abc123/init.lua"
+//!     "target": "/syslua/store/build/abc123/init.lua"
 //!   }
 //! }
 //! ```
@@ -30,7 +30,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::store::paths::StorePaths;
+use crate::bind::store::bind_dir_path;
 use crate::util::hash::ObjectHash;
 
 /// State file name within bind directory.
@@ -89,21 +89,9 @@ pub enum BindStateError {
   Remove(#[source] io::Error),
 }
 
-/// Get the bind state directory path for a given bind hash.
-///
-/// Returns `store/bind/<short_hash>/` where short_hash is the truncated hash.
-pub fn bind_state_dir(hash: &ObjectHash, system: bool) -> PathBuf {
-  let store = if system {
-    StorePaths::system_store_path()
-  } else {
-    StorePaths::user_store_path()
-  };
-  store.join("bind").join(hash.0.as_str())
-}
-
 /// Get the bind state file path for a given bind hash.
 fn bind_state_path(hash: &ObjectHash, system: bool) -> PathBuf {
-  bind_state_dir(hash, system).join(STATE_FILENAME)
+  bind_dir_path(hash, system).join(STATE_FILENAME)
 }
 
 /// Save bind state after successful apply.
@@ -111,7 +99,7 @@ fn bind_state_path(hash: &ObjectHash, system: bool) -> PathBuf {
 /// Creates the bind directory if it doesn't exist and writes the state file.
 /// Uses atomic write (write to temp, then rename) to prevent corruption.
 pub fn save_bind_state(hash: &ObjectHash, state: &BindState, system: bool) -> Result<(), BindStateError> {
-  let dir = bind_state_dir(hash, system);
+  let dir = bind_dir_path(hash, system);
   let path = dir.join(STATE_FILENAME);
 
   // Create directory if needed
@@ -150,7 +138,7 @@ pub fn load_bind_state(hash: &ObjectHash, system: bool) -> Result<Option<BindSta
 /// Removes the entire bind directory including the state file.
 /// Silently succeeds if the directory doesn't exist.
 pub fn remove_bind_state(hash: &ObjectHash, system: bool) -> Result<(), BindStateError> {
-  let dir = bind_state_dir(hash, system);
+  let dir = bind_dir_path(hash, system);
 
   match fs::remove_dir_all(&dir) {
     Ok(()) => Ok(()),
@@ -169,7 +157,6 @@ mod tests {
   use crate::util::hash::ObjectHash;
 
   use super::*;
-  use serial_test::serial;
   use tempfile::TempDir;
 
   fn with_temp_store<F>(f: F)
@@ -184,11 +171,10 @@ mod tests {
 
   /// Get the bind state file path for a given bind hash (test helper).
   fn test_bind_state_path(hash: &ObjectHash, system: bool) -> PathBuf {
-    bind_state_dir(hash, system).join(STATE_FILENAME)
+    bind_dir_path(hash, system).join(STATE_FILENAME)
   }
 
   #[test]
-  #[serial]
   fn save_and_load_roundtrip() {
     with_temp_store(|_| {
       let hash = ObjectHash("abc123def456789012345678".to_string());
@@ -205,7 +191,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_nonexistent_returns_none() {
     with_temp_store(|_| {
       let hash = ObjectHash("nonexistent123456789012".to_string());
@@ -215,7 +200,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn remove_cleans_up_directory() {
     with_temp_store(|_| {
       let hash = ObjectHash("abc123def456789012345678".to_string());
@@ -232,7 +216,6 @@ mod tests {
   // Corrupt state handling tests
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_invalid_json() {
     with_temp_store(|_| {
       let hash = ObjectHash("corrupt_json_test123456".to_string());
@@ -258,7 +241,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_wrong_schema() {
     with_temp_store(|_| {
       let hash = ObjectHash("wrong_schema_test12345".to_string());
@@ -277,7 +259,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_empty_file() {
     with_temp_store(|_| {
       let hash = ObjectHash("empty_file_test1234567".to_string());
@@ -295,7 +276,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_null_json() {
     with_temp_store(|_| {
       let hash = ObjectHash("null_json_test12345678".to_string());
@@ -313,7 +293,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_array_instead_of_object() {
     with_temp_store(|_| {
       let hash = ObjectHash("array_json_test1234567".to_string());
@@ -331,7 +310,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn load_bind_state_handles_outputs_with_wrong_type() {
     with_temp_store(|_| {
       let hash = ObjectHash("wrong_output_type12345".to_string());

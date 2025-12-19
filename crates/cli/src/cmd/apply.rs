@@ -45,6 +45,7 @@ pub fn cmd_apply(file: &str) -> Result<()> {
   println!("  Builds realized: {}", result.execution.realized.len());
   println!("  Builds cached: {}", result.diff.builds_cached.len());
   println!("  Binds applied: {}", result.execution.applied.len());
+  println!("  Binds updated: {}", result.binds_updated);
   println!("  Binds destroyed: {}", result.binds_destroyed);
   println!("  Binds unchanged: {}", result.diff.binds_unchanged.len());
 

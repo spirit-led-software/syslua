@@ -2550,6 +2550,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "syslua-lib",
+ "temp-env",
  "tempfile",
  "tokio",
  "tracing",

@@ -417,7 +417,7 @@ async fn execute_bind_wave(
         &completed_builds,
         &completed_binds,
         &manifest,
-        "/tmp", // Temporary; apply_bind creates its own working dir
+        "/tmp".to_string(), // Temporary; apply_bind creates its own working dir
         config.system,
       );
 
@@ -496,7 +496,7 @@ async fn rollback_binds(
   // (destroy actions typically don't need to reference other completed nodes)
   let empty_builds = HashMap::new();
   let empty_binds = HashMap::new();
-  let resolver = ExecutionResolver::new(&empty_builds, &empty_binds, manifest, "/tmp", config.system);
+  let resolver = ExecutionResolver::new(&empty_builds, &empty_binds, manifest, "/tmp".to_string(), config.system);
 
   // Rollback in reverse order
   for hash in applied_order.iter().rev() {
@@ -599,17 +599,15 @@ mod tests {
       testutil::{echo_msg, shell_cmd},
     },
   };
-  use serial_test::serial;
   use std::collections::BTreeMap;
   use tempfile::TempDir;
 
-  fn make_build(name: &str, inputs: Option<BuildInputs>) -> BuildDef {
-    let (cmd, args) = echo_msg(name);
+  fn make_build(id: &str, inputs: Option<BuildInputs>) -> BuildDef {
+    let (cmd, args) = echo_msg(id);
     BuildDef {
-      name: name.to_string(),
-      version: None,
+      id: None,
       inputs,
-      apply_actions: vec![Action::Exec(ExecOpts {
+      create_actions: vec![Action::Exec(ExecOpts {
         bin: cmd.to_string(),
         args: Some(args),
         env: None,
@@ -693,7 +691,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_empty_manifest() {
     with_temp_store(|| async {
       let manifest = Manifest::default();
@@ -707,7 +704,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_single_independent_build() {
     with_temp_store(|| async {
       let build = make_build("test", None);
@@ -726,7 +722,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_parallel_independent_builds() {
     with_temp_store(|| async {
       let build_a = make_build("a", None);
@@ -752,7 +747,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_dependent_builds() {
     with_temp_store(|| async {
       let build_a = make_build("a", None);
@@ -778,15 +772,13 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_failing_build() {
     with_temp_store(|| async {
       let (cmd, args) = shell_cmd("exit 1");
       let build = BuildDef {
-        name: "failing".to_string(),
-        version: None,
+        id: None,
         inputs: None,
-        apply_actions: vec![Action::Exec(ExecOpts {
+        create_actions: vec![Action::Exec(ExecOpts {
           bin: cmd.to_string(),
           args: Some(args),
           env: None,
@@ -810,16 +802,14 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_skip_dependent_on_failure() {
     with_temp_store(|| async {
       // A fails, B depends on A -> B should be skipped
       let (cmd, args) = shell_cmd("exit 1");
       let build_a = BuildDef {
-        name: "a".to_string(),
-        version: None,
+        id: None,
         inputs: None,
-        apply_actions: vec![Action::Exec(ExecOpts {
+        create_actions: vec![Action::Exec(ExecOpts {
           bin: cmd.to_string(),
           args: Some(args),
           env: None,
@@ -851,7 +841,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn execute_diamond_dependency() {
     with_temp_store(|| async {
       //     A
@@ -894,30 +883,31 @@ mod tests {
 
   use crate::bind::BindDef;
 
-  fn make_bind(script: &str, inputs: Option<BindInputs>) -> BindDef {
+  fn make_bind(id: &str, script: &str, inputs: Option<BindInputs>) -> BindDef {
     let (cmd, args) = shell_cmd(script);
     BindDef {
+      id: Some(id.to_string()),
       inputs,
-      apply_actions: vec![Action::Exec(ExecOpts {
+      outputs: None,
+      create_actions: vec![Action::Exec(ExecOpts {
         bin: cmd.to_string(),
         args: Some(args),
         env: None,
         cwd: None,
       })],
-      outputs: None,
-      destroy_actions: None,
+      update_actions: None,
+      destroy_actions: vec![],
     }
   }
 
   #[test]
-  #[serial]
   fn manifest_bind_after_build() {
     // Bind depends on build -> bind executes after build
     with_temp_store(|| async {
       let build = make_build("app", None);
       let build_hash = build.compute_hash().unwrap();
 
-      let bind = make_bind("echo linking", Some(BindInputs::Build(build_hash.clone())));
+      let bind = make_bind("bind1", "echo linking", Some(BindInputs::Build(build_hash.clone())));
       let bind_hash = bind.compute_hash().unwrap();
 
       let mut manifest = Manifest::default();
@@ -936,17 +926,16 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_bind_chain() {
     // Bind A -> Bind B -> Bind C (linear chain)
     with_temp_store(|| async {
-      let bind_a = make_bind("echo step_a", None);
+      let bind_a = make_bind("bind1", "echo step_a", None);
       let hash_a = bind_a.compute_hash().unwrap();
 
-      let bind_b = make_bind("echo step_b", Some(BindInputs::Bind(hash_a.clone())));
+      let bind_b = make_bind("bind2", "echo step_b", Some(BindInputs::Bind(hash_a.clone())));
       let hash_b = bind_b.compute_hash().unwrap();
 
-      let bind_c = make_bind("echo step_c", Some(BindInputs::Bind(hash_b.clone())));
+      let bind_c = make_bind("bind3", "echo step_c", Some(BindInputs::Bind(hash_b.clone())));
       let hash_c = bind_c.compute_hash().unwrap();
 
       let mut manifest = Manifest::default();
@@ -966,17 +955,15 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_bind_placeholder_resolution() {
     // Bind uses $${build:hash:out} placeholder that should resolve to build output
     with_temp_store(|| async {
       // Build that produces an output
       let (echo_cmd, echo_args) = shell_cmd("echo built");
       let build = BuildDef {
-        name: "provider".to_string(),
-        version: None,
+        id: None,
         inputs: None,
-        apply_actions: vec![Action::Exec(ExecOpts {
+        create_actions: vec![Action::Exec(ExecOpts {
           bin: echo_cmd.to_string(),
           args: Some(echo_args),
           env: None,
@@ -990,15 +977,17 @@ mod tests {
       // Using the full hash in the command to test placeholder resolution
       let (bind_cmd, bind_args) = shell_cmd(&format!("echo using $$${{build:{}:bin}}", build_hash.0));
       let bind = BindDef {
+        id: None,
         inputs: Some(BindInputs::Build(build_hash.clone())),
-        apply_actions: vec![Action::Exec(ExecOpts {
+        outputs: None,
+        create_actions: vec![Action::Exec(ExecOpts {
           bin: bind_cmd.to_string(),
           args: Some(bind_args),
           env: None,
           cwd: None,
         })],
-        outputs: None,
-        destroy_actions: None,
+        update_actions: None,
+        destroy_actions: vec![],
       };
       let bind_hash = bind.compute_hash().unwrap();
 
@@ -1021,7 +1010,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_bind_failure_rollback() {
     // Bind A succeeds, Bind B fails -> Bind A should be rolled back (destroyed)
     with_temp_store(|| async {
@@ -1043,35 +1031,39 @@ mod tests {
 
       // Use platform-specific commands since PATH is isolated
       let bind_a = BindDef {
+        id: None,
         inputs: None,
-        apply_actions: vec![Action::Exec(ExecOpts {
+        outputs: None,
+        create_actions: vec![Action::Exec(ExecOpts {
           bin: touch_cmd_str,
           args: Some(touch_args),
           env: None,
           cwd: None,
         })],
-        outputs: None,
-        destroy_actions: Some(vec![Action::Exec(ExecOpts {
+        update_actions: None,
+        destroy_actions: vec![Action::Exec(ExecOpts {
           bin: rm_cmd_str,
           args: Some(rm_args),
           env: None,
           cwd: None,
-        })]),
+        })],
       };
       let hash_a = bind_a.compute_hash().unwrap();
 
       // Bind B depends on A and fails
       let (exit_cmd, exit_args) = shell_cmd("exit 1");
       let bind_b = BindDef {
+        id: None,
         inputs: Some(BindInputs::Bind(hash_a.clone())),
-        apply_actions: vec![Action::Exec(ExecOpts {
+        outputs: None,
+        create_actions: vec![Action::Exec(ExecOpts {
           bin: exit_cmd.to_string(),
           args: Some(exit_args),
           env: None,
           cwd: None,
         })],
-        outputs: None,
-        destroy_actions: None,
+        update_actions: None,
+        destroy_actions: vec![],
       };
       let hash_b = bind_b.compute_hash().unwrap();
 
@@ -1114,15 +1106,13 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_build_failure_skips_binds() {
     // Build fails -> dependent bind should be skipped (not applied)
     with_temp_store(|| async {
       let build = BuildDef {
-        name: "failing-build".to_string(),
-        version: None,
+        id: None,
         inputs: None,
-        apply_actions: vec![Action::Exec(ExecOpts {
+        create_actions: vec![Action::Exec(ExecOpts {
           bin: "exit 1".to_string(),
           args: None,
           env: None,
@@ -1132,7 +1122,11 @@ mod tests {
       };
       let build_hash = build.compute_hash().unwrap();
 
-      let bind = make_bind("echo should-not-run", Some(BindInputs::Build(build_hash.clone())));
+      let bind = make_bind(
+        "bind",
+        "echo should-not-run",
+        Some(BindInputs::Build(build_hash.clone())),
+      );
       let bind_hash = bind.compute_hash().unwrap();
 
       let mut manifest = Manifest::default();
@@ -1153,7 +1147,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_mixed_wave_execution() {
     // Independent builds and binds should run in parallel within a wave
     // Build A (no deps) and Bind X (no deps) can run together
@@ -1165,10 +1158,10 @@ mod tests {
       let build_b = make_build("b", Some(BuildInputs::Build(hash_a.clone())));
       let hash_b = build_b.compute_hash().unwrap();
 
-      let bind_x = make_bind("echo x", None);
+      let bind_x = make_bind("bind-x", "echo x", None);
       let hash_x = bind_x.compute_hash().unwrap();
 
-      let bind_y = make_bind("echo y", Some(BindInputs::Bind(hash_x.clone())));
+      let bind_y = make_bind("bind-y", "echo y", Some(BindInputs::Bind(hash_x.clone())));
       let hash_y = bind_y.compute_hash().unwrap();
 
       let mut manifest = Manifest::default();
@@ -1193,7 +1186,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_empty() {
     // Empty manifest should succeed with no nodes
     with_temp_store(|| async {
@@ -1210,14 +1202,13 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   fn manifest_only_binds() {
     // Manifest with only binds (no builds)
     with_temp_store(|| async {
-      let bind_a = make_bind("echo a", None);
+      let bind_a = make_bind("bind-a", "echo a", None);
       let hash_a = bind_a.compute_hash().unwrap();
 
-      let bind_b = make_bind("echo b", None);
+      let bind_b = make_bind("bind-b", "echo b", None);
       let hash_b = bind_b.compute_hash().unwrap();
 
       let mut manifest = Manifest::default();

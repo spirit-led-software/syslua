@@ -8,7 +8,7 @@ pub fn bind_dir_name(hash: &ObjectHash) -> String {
   hash.to_string()
 }
 
-pub fn bind_path(hash: &ObjectHash, system: bool) -> PathBuf {
+pub fn bind_dir_path(hash: &ObjectHash, system: bool) -> PathBuf {
   let store = if system {
     StorePaths::system_store_path()
   } else {
@@ -22,33 +22,18 @@ mod tests {
   use super::*;
 
   #[test]
-  fn object_dir_name_with_version() {
-    // 24 char hash, first 20 chars = abc123def45678901234
+  fn test_bind_dir_name() {
     let hash = ObjectHash("abc123def45678901234".to_string());
     let name = bind_dir_name(&hash);
     assert_eq!(name, "abc123def45678901234");
   }
 
   #[test]
-  fn object_dir_name_without_version() {
-    let hash = ObjectHash("abc123def45678901234".to_string());
-    let name = bind_dir_name(&hash);
-    assert_eq!(name, "abc123def45678901234");
-  }
-
-  #[test]
-  fn object_dir_name_short_hash() {
-    let hash = ObjectHash("abc".to_string());
-    let name = bind_dir_name(&hash);
-    assert_eq!(name, "abc");
-  }
-
-  #[test]
-  fn object_path_includes_obj_dir() {
+  fn test_bind_path_includes_bind_dir() {
     use std::path::Path;
 
     let hash = ObjectHash("abc123def45678901234".to_string());
-    let path = bind_path(&hash, false);
+    let path = bind_dir_path(&hash, false);
     // Check that path ends with bind/{hash}
     // Note: We don't check for "store" because SYSLUA_USER_STORE env var can override to any path
     let expected_suffix = Path::new("bind").join("abc123def45678901234");

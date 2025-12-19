@@ -210,7 +210,6 @@ mod tests {
   use tempfile::tempdir;
 
   /// Cross-platform symlink creation helper
-  #[allow(dead_code)]
   fn create_symlink(target: &Path, link: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {

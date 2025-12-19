@@ -3,12 +3,18 @@ use std::path::PathBuf;
 
 #[cfg(windows)]
 pub fn root_dir() -> PathBuf {
+  if let Ok(root) = std::env::var("SYSLUA_ROOT") {
+    return PathBuf::from(root);
+  }
   let drive = std::env::var("SYSTEMDRIVE").expect("SYSTEMDRIVE not set");
-  PathBuf::from(drive).join(APP_NAME)
+  PathBuf::from(format!("{}\\", drive)).join(APP_NAME)
 }
 
 #[cfg(not(windows))]
 pub fn root_dir() -> PathBuf {
+  if let Ok(root) = std::env::var("SYSLUA_ROOT") {
+    return PathBuf::from(root);
+  }
   PathBuf::from("/").join(APP_NAME)
 }
 
@@ -90,8 +96,9 @@ pub fn cache_dir() -> PathBuf {
 #[cfg(test)]
 #[cfg(not(windows))]
 mod tests {
-  use super::*;
   use serial_test::serial;
+
+  use super::*;
 
   #[test]
   #[serial]

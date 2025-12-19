@@ -109,7 +109,7 @@ fn parse_bind_ref_table(t: &LuaTable, manifest: &Manifest) -> LuaResult<BindInpu
   Ok(BindInputs::Bind(bind_hash))
 }
 
-/// Convert BindInputsRef to a Lua value for passing to the apply function.
+/// Convert BindInputsRef to a Lua value for passing to the create function.
 ///
 /// For Build/Bind references, looks up the definition in the manifest to
 /// reconstruct the Lua table with placeholder outputs.
@@ -171,20 +171,32 @@ pub fn bind_hash_to_lua(lua: &Lua, hash: &ObjectHash, manifest: &Manifest) -> Lu
 /// Register the `sys.bind` function on the sys table.
 ///
 /// The `sys.bind{}` function:
-/// 1. Parses a BindSpec from the Lua table (inputs, apply, destroy)
+/// 1. Parses a BindSpec from the Lua table (inputs, create, update, destroy)
 /// 2. Resolves inputs (calls function if dynamic, uses table directly if static)
-/// 3. Creates a ActionCtx and calls the apply function
+/// 3. Creates a ActionCtx and calls the create function
 /// 4. Optionally calls the destroy function with a fresh ActionCtx
 /// 5. Creates a BindDef, computes its hash, and adds it to the manifest
 /// 6. Returns a BindRef as a Lua table with metatable marker
 pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<Manifest>>) -> LuaResult<()> {
   let bind_fn = lua.create_function(move |lua, spec_table: LuaTable| {
     // 1. Parse the BindSpec from the Lua table
-    let apply_fn: LuaFunction = spec_table
-      .get("apply")
-      .map_err(|_| LuaError::external("bind spec requires 'apply' function"))?;
+    let id: Option<String> = spec_table.get("id")?;
 
-    let destroy_fn: Option<LuaFunction> = spec_table.get("destroy")?;
+    let create_fn: LuaFunction = spec_table
+      .get("create")
+      .map_err(|_| LuaError::external("bind spec requires 'create' function"))?;
+
+    let update_fn: Option<LuaFunction> = spec_table.get("update")?;
+
+    if update_fn.is_some() && id.is_none() {
+      return Err(LuaError::external(
+        "bind spec with 'update' function requires 'id' field",
+      ));
+    }
+
+    let destroy_fn: LuaFunction = spec_table
+      .get("destroy")
+      .map_err(|_| LuaError::external("bind spec requires 'destroy' function"))?;
 
     // 2. Resolve inputs (if provided)
     let inputs_value: Option<LuaValue> = spec_table.get("inputs")?;
@@ -203,64 +215,123 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       None => None,
     };
 
-    // 3. Create ActionCtx and call the apply function
-    let apply_ctx = ActionCtx::new();
-    let apply_ctx_userdata = lua.create_userdata(apply_ctx)?;
+    // 3. Create ActionCtx and call the create function
+    let mut create_ctx = ActionCtx::new();
+    let create_ctx_userdata = lua.create_userdata(create_ctx)?;
 
-    // Prepare inputs argument for apply function
+    // Prepare inputs argument for create function
     let inputs_arg: LuaValue = match &resolved_inputs {
       Some(inputs) => bind_inputs_ref_to_lua(lua, inputs, &manifest.borrow())?,
       None => LuaValue::Table(lua.create_table()?), // Empty table if no inputs
     };
 
-    // Call: apply(inputs, ctx) -> outputs (optional)
-    let apply_result: LuaValue = apply_fn.call((inputs_arg, &apply_ctx_userdata))?;
+    // Call: create(inputs, ctx) -> outputs (optional)
+    let create_result: LuaValue = create_fn.call((&inputs_arg, &create_ctx_userdata))?;
 
-    // 4. Extract outputs from apply return value (optional for binds)
-    let outputs: Option<BTreeMap<String, String>> = match apply_result {
+    // 4. Extract outputs from create return value (optional for binds)
+    let outputs: Option<BTreeMap<String, String>> = match create_result {
       LuaValue::Table(t) => {
         let parsed = parse_outputs(t)?;
         if parsed.is_empty() { None } else { Some(parsed) }
       }
       LuaValue::Nil => None,
       _ => {
-        return Err(LuaError::external("bind apply must return a table of outputs or nil"));
+        return Err(LuaError::external("bind create must return a table of outputs or nil"));
       }
     };
 
-    // 5. Extract apply actions from ActionCtx
-    let apply_ctx: ActionCtx = apply_ctx_userdata.take()?;
-    let apply_actions = apply_ctx.into_actions();
+    // 5. Extract create actions from ActionCtx
+    create_ctx = create_ctx_userdata.take()?;
+    let create_actions = create_ctx.into_actions();
 
-    // 6. Optionally call destroy function
-    let destroy_actions = if let Some(destroy_fn) = destroy_fn {
-      let destroy_ctx = ActionCtx::new();
-      let destroy_ctx_userdata = lua.create_userdata(destroy_ctx)?;
+    // Create outputs argument for destroy function
+    // The outputs contain $${out} placeholders that will be resolved at runtime
+    let outputs_arg: LuaValue = match &outputs {
+      Some(outs) => {
+        let outputs_table = outputs_to_lua_table(lua, outs)?;
+        LuaValue::Table(outputs_table)
+      }
+      None => LuaValue::Table(lua.create_table()?),
+    };
 
-      // Create outputs argument for destroy function
-      // The outputs contain $${out} placeholders that will be resolved at runtime
-      let destroy_outputs_arg: LuaValue = match &outputs {
-        Some(outs) => {
-          let outputs_table = outputs_to_lua_table(lua, outs)?;
-          LuaValue::Table(outputs_table)
+    let update_actions = if let Some(update_fn) = update_fn {
+      let update_ctx = ActionCtx::new();
+      let update_ctx_userdata = lua.create_userdata(update_ctx)?;
+
+      // Call: update(outputs, inputs, ctx) -> outputs (must match create's output keys)
+      let update_result: LuaValue = update_fn.call((&outputs_arg, &inputs_arg, &update_ctx_userdata))?;
+
+      // Validate update returns same output shape as create
+      match (&update_result, &outputs) {
+        (LuaValue::Table(update_table), Some(create_outputs)) => {
+          let update_outputs = parse_outputs(update_table.clone())?;
+          let create_keys: std::collections::HashSet<_> = create_outputs.keys().collect();
+          let update_keys: std::collections::HashSet<_> = update_outputs.keys().collect();
+
+          if create_keys != update_keys {
+            return Err(LuaError::external(format!(
+              "update must return same output keys as create. create: {:?}, update: {:?}",
+              create_keys, update_keys
+            )));
+          }
         }
-        None => LuaValue::Table(lua.create_table()?),
-      };
+        (LuaValue::Table(update_table), None) => {
+          let update_outputs = parse_outputs(update_table.clone())?;
+          if !update_outputs.is_empty() {
+            return Err(LuaError::external(format!(
+              "update returned outputs but create did not. update keys: {:?}",
+              update_outputs.keys().collect::<Vec<_>>()
+            )));
+          }
+        }
+        (LuaValue::Nil, Some(create_outputs)) => {
+          if !create_outputs.is_empty() {
+            return Err(LuaError::external(format!(
+              "update returned nil but create returned outputs. create keys: {:?}",
+              create_outputs.keys().collect::<Vec<_>>()
+            )));
+          }
+        }
+        (LuaValue::Nil, None) => {
+          // Both return nil/empty, that's fine
+        }
+        (other, _) => {
+          return Err(LuaError::external(format!(
+            "update must return a table of outputs or nil, got: {:?}",
+            other.type_name()
+          )));
+        }
+      }
 
-      // Call: destroy(outputs, ctx) -> ignored
-      let _: LuaValue = destroy_fn.call((destroy_outputs_arg, &destroy_ctx_userdata))?;
-
-      let destroy_ctx: ActionCtx = destroy_ctx_userdata.take()?;
-      let actions = destroy_ctx.into_actions();
-      if actions.is_empty() { None } else { Some(actions) }
+      let update_ctx: ActionCtx = update_ctx_userdata.take()?;
+      let update_actions = update_ctx.into_actions();
+      if update_actions.is_empty() {
+        None
+      } else {
+        Some(update_actions)
+      }
     } else {
       None
     };
 
+    // 6. Call destroy function
+    let destroy_actions = {
+      let destroy_ctx = ActionCtx::new();
+      let destroy_ctx_userdata = lua.create_userdata(destroy_ctx)?;
+
+      // Call: destroy(outputs, ctx) -> ignored
+      let _: LuaValue = destroy_fn.call((outputs_arg, &destroy_ctx_userdata))?;
+
+      let destroy_ctx: ActionCtx = destroy_ctx_userdata.take()?;
+      destroy_ctx.into_actions()
+    };
+
     // 7. Create BindDef
     let bind_def = BindDef {
+      id,
       inputs: resolved_inputs.clone(),
-      apply_actions,
+      create_actions,
+      update_actions,
       outputs: outputs.clone(),
       destroy_actions,
     };
@@ -270,7 +341,23 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       .compute_hash()
       .map_err(|e| LuaError::external(format!("failed to compute bind hash: {}", e)))?;
 
-    // 9. Add to manifest (deduplicate by hash)
+    // 9. Check for duplicate bind IDs (only for binds with IDs)
+    if let Some(ref id) = bind_def.id {
+      let manifest_ref = manifest.borrow();
+      for (existing_hash, existing_def) in manifest_ref.bindings.iter() {
+        if let Some(ref existing_id) = existing_def.id
+          && existing_id == id
+          && *existing_hash != hash
+        {
+          return Err(LuaError::external(format!(
+            "duplicate bind id '{}': a bind with this id already exists (hash: {})",
+            id, existing_hash.0
+          )));
+        }
+      }
+    }
+
+    // 10. Add to manifest (deduplicate by hash)
     {
       let mut manifest = manifest.borrow_mut();
       if manifest.bindings.contains_key(&hash) {
@@ -283,7 +370,7 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       }
     }
 
-    // 10. Create and return BindRef as Lua table
+    // 11. Create and return BindRef as Lua table
     let ref_table = lua.create_table()?;
     ref_table.set("hash", hash.0.as_str())?;
 
@@ -343,8 +430,12 @@ mod tests {
         .load(
           r#"
                 return sys.bind({
-                    apply = function(inputs, ctx)
+                    id = "simple-bind",
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf /src /dest")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("rm /dest")
                     end,
                 })
             "#,
@@ -364,7 +455,7 @@ mod tests {
       let manifest = manifest.borrow();
       assert_eq!(manifest.bindings.len(), 1);
       let (_, bind_def) = manifest.bindings.iter().next().unwrap();
-      assert_eq!(bind_def.apply_actions.len(), 1);
+      assert_eq!(bind_def.create_actions.len(), 1);
 
       Ok(())
     }
@@ -377,9 +468,13 @@ mod tests {
         .load(
           r#"
                 return sys.bind({
-                    apply = function(inputs, ctx)
+                    id = "bind-with-outputs",
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf /src /dest")
                         return { link = "/dest" }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("rm /dest")
                     end,
                 })
             "#,
@@ -409,7 +504,8 @@ mod tests {
         .load(
           r#"
                 return sys.bind({
-                    apply = function(inputs, ctx)
+                    id = "bind-with-destroy",
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf /src /dest")
                     end,
                     destroy = function(inputs, ctx)
@@ -423,8 +519,7 @@ mod tests {
       let manifest = manifest.borrow();
       assert_eq!(manifest.bindings.len(), 1);
       let (_, bind_def) = manifest.bindings.iter().next().unwrap();
-      assert!(bind_def.destroy_actions.is_some());
-      assert_eq!(bind_def.destroy_actions.as_ref().unwrap().len(), 1);
+      assert_eq!(bind_def.destroy_actions.len(), 1);
 
       Ok(())
     }
@@ -437,16 +532,17 @@ mod tests {
         .load(
           r#"
                 local pkg = sys.build({
-                    name = "my-pkg",
-                    apply = function(inputs, ctx)
+                    id = "my-pkg",
+                    create = function(inputs, ctx)
                         ctx:exec("make install")
                         return { out = "/store/my-pkg" }
                     end,
                 })
 
                 return sys.bind({
+                    id = "bind-with-build-input",
                     inputs = { pkg = pkg },
-                    apply = function(inputs, ctx)
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf " .. inputs.pkg.outputs.out .. "/bin/app /usr/local/bin/app")
                     end,
                     destroy = function(inputs, ctx)
@@ -491,9 +587,14 @@ mod tests {
         .load(
           r#"
                 return sys.bind({
+                    id = "bind-with-static-inputs",
                     inputs = { src = "/path/to/source", dest = "/path/to/dest" },
-                    apply = function(inputs, ctx)
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf " .. inputs.src .. " " .. inputs.dest)
+                        return { dest = inputs.dest }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("rm " .. outputs.dest)
                     end,
                 })
             "#,
@@ -522,11 +623,16 @@ mod tests {
         .load(
           r#"
                 return sys.bind({
+                    id = "bind-with-dynamic-inputs",
                     inputs = function()
                         return { computed = "dynamic-value" }
                     end,
-                    apply = function(inputs, ctx)
+                    create = function(inputs, ctx)
                         ctx:exec("echo " .. inputs.computed)
+                        return { result = inputs.computed }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo cleanup " .. outputs.result)
                     end,
                 })
             "#,
@@ -550,13 +656,14 @@ mod tests {
     }
 
     #[test]
-    fn bind_without_apply_fails() -> LuaResult<()> {
+    fn bind_without_create_fails() -> LuaResult<()> {
       let (lua, _) = create_test_lua_with_manifest()?;
 
       let result = lua
         .load(
           r#"
                 return sys.bind({
+                    id = "bind-without-create",
                     destroy = function(inputs, ctx)
                         ctx:exec("rm /dest")
                     end,
@@ -567,7 +674,7 @@ mod tests {
 
       assert!(result.is_err());
       let err = result.unwrap_err().to_string();
-      assert!(err.contains("apply"), "error should mention 'apply': {}", err);
+      assert!(err.contains("create"), "error should mention 'create': {}", err);
 
       Ok(())
     }
@@ -579,9 +686,21 @@ mod tests {
       lua
         .load(
           r#"
-                sys.bind({ apply = function(i, c) c:exec("a") end })
-                sys.bind({ apply = function(i, c) c:exec("b") end })
-                sys.bind({ apply = function(i, c) c:exec("c") end })
+                sys.bind({
+                    id = "bind-a",
+                    create = function(i, c) c:exec("a") end,
+                    destroy = function(i, c) c:exec("rm a") end
+                })
+                sys.bind({
+                    id = "bind-b",
+                    create = function(i, c) c:exec("b") end,
+                    destroy = function(i, c) c:exec("rm b") end
+                })
+                sys.bind({
+                    id = "bind-c",
+                    create = function(i, c) c:exec("c") end,
+                    destroy = function(i, c) c:exec("rm c") end
+                })
             "#,
         )
         .exec()?;
@@ -599,8 +718,9 @@ mod tests {
 
       let code = r#"
                 return sys.bind({
+                    id = "my-bind",
                     inputs = { key = "value" },
-                    apply = function(inputs, ctx)
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf /src /dest")
                     end,
                     destroy = function(inputs, ctx)
@@ -621,21 +741,14 @@ mod tests {
     }
 
     #[test]
-    fn bind_hash_changes_with_destroy() -> LuaResult<()> {
+    fn bind_hash_changes_with_update() -> LuaResult<()> {
       let (lua1, _) = create_test_lua_with_manifest()?;
       let (lua2, _) = create_test_lua_with_manifest()?;
 
-      let code_without_destroy = r#"
+      let code_without_update = r#"
                 return sys.bind({
-                    apply = function(inputs, ctx)
-                        ctx:exec("ln -sf /src /dest")
-                    end,
-                })
-            "#;
-
-      let code_with_destroy = r#"
-                return sys.bind({
-                    apply = function(inputs, ctx)
+                    id = "my-bind",
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf /src /dest")
                     end,
                     destroy = function(inputs, ctx)
@@ -644,8 +757,23 @@ mod tests {
                 })
             "#;
 
-      let ref1: LuaTable = lua1.load(code_without_destroy).eval()?;
-      let ref2: LuaTable = lua2.load(code_with_destroy).eval()?;
+      let code_with_update = r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("ln -sf /src /dest")
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo updating...")
+                    end,
+                    destroy = function(inputs, ctx)
+                        ctx:exec("rm /dest")
+                    end,
+                })
+            "#;
+
+      let ref1: LuaTable = lua1.load(code_without_update).eval()?;
+      let ref2: LuaTable = lua2.load(code_with_update).eval()?;
 
       let hash1: String = ref1.get("hash")?;
       let hash2: String = ref2.get("hash")?;
@@ -664,15 +792,25 @@ mod tests {
         .load(
           r#"
                 sys.bind({
+                    id = "my-bind",
                     inputs = { src = "/src", dest = "/dest" },
-                    apply = function(inputs, ctx)
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf " .. inputs.src .. " " .. inputs.dest)
+                        return { dest = inputs.dest }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("rm " .. outputs.dest)
                     end,
                 })
                 sys.bind({
+                    id = "my-bind",
                     inputs = { src = "/src", dest = "/dest" },
-                    apply = function(inputs, ctx)
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf " .. inputs.src .. " " .. inputs.dest)
+                        return { dest = inputs.dest }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("rm " .. outputs.dest)
                     end,
                 })
             "#,
@@ -694,9 +832,14 @@ mod tests {
         .load(
           r#"
                 return sys.bind({
+                    id = "my-bind",
                     inputs = { src = "/path/to/source", dest = "/path/to/dest" },
-                    apply = function(inputs, ctx)
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf " .. inputs.src .. " " .. inputs.dest)
+                        return { dest = inputs.dest }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("rm " .. outputs.dest)
                     end,
                 })
             "#,
@@ -722,8 +865,12 @@ mod tests {
         .load(
           r#"
                 return sys.bind({
-                    apply = function(inputs, ctx)
+                    id = "my-bind",
+                    create = function(inputs, ctx)
                         ctx:exec("ln -sf /src /dest")
+                    end,
+                    destroy = function(inputs, ctx)
+                        ctx:exec("rm /dest")
                     end,
                 })
             "#,
@@ -746,10 +893,14 @@ mod tests {
         .load(
           r#"
                 return sys.bind({
-                    apply = function(inputs, ctx)
+                    id = "bind-with-out",
+                    create = function(inputs, ctx)
                         -- ctx.out should return $${out} placeholder
                         ctx:exec("mkdir -p " .. ctx.out)
                         return { out = ctx.out }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("rm -rf " .. ctx.out)
                     end,
                 })
             "#,
@@ -776,9 +927,13 @@ mod tests {
         .load(
           r#"
                 sys.bind({
-                    apply = function(inputs, ctx)
+                    id = "bind-with-ctx-out",
+                    create = function(inputs, ctx)
                         ctx:exec("mkdir -p " .. ctx.out)
                         ctx:exec("ln -sf /src " .. ctx.out .. "/link")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("rm -rf " .. ctx.out)
                     end,
                 })
             "#,
@@ -789,9 +944,9 @@ mod tests {
       let (_, bind_def) = manifest.bindings.iter().next().unwrap();
 
       // Check that the commands contain the $${out} placeholder
-      assert_eq!(bind_def.apply_actions.len(), 2);
+      assert_eq!(bind_def.create_actions.len(), 2);
 
-      match &bind_def.apply_actions[0] {
+      match &bind_def.create_actions[0] {
         Action::Exec(opts) => {
           assert!(
             opts.bin.contains("$${out}"),
@@ -805,7 +960,7 @@ mod tests {
         }
       }
 
-      match &bind_def.apply_actions[1] {
+      match &bind_def.create_actions[1] {
         Action::Exec(opts) => {
           assert!(
             opts.bin.contains("$${out}"),
@@ -830,7 +985,8 @@ mod tests {
         .load(
           r#"
                 sys.bind({
-                    apply = function(inputs, ctx)
+                    id = "bind-with-ctx-out-destroy",
+                    create = function(inputs, ctx)
                         ctx:exec("mkdir -p " .. ctx.out)
                     end,
                     destroy = function(inputs, ctx)
@@ -845,10 +1001,9 @@ mod tests {
       let (_, bind_def) = manifest.bindings.iter().next().unwrap();
 
       // Check that destroy commands also contain the $${out} placeholder
-      let destroy_actions = bind_def.destroy_actions.as_ref().expect("should have destroy actions");
-      assert_eq!(destroy_actions.len(), 1);
+      assert_eq!(bind_def.destroy_actions.len(), 1);
 
-      match &destroy_actions[0] {
+      match &bind_def.destroy_actions[0] {
         Action::Exec(opts) => {
           assert!(
             opts.bin.contains("$${out}"),
@@ -861,6 +1016,254 @@ mod tests {
           panic!("expected Cmd action");
         }
       }
+
+      Ok(())
+    }
+
+    #[test]
+    fn duplicate_bind_id_with_different_content_fails() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                -- First bind with id "my-bind"
+                sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo first")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy first")
+                    end,
+                })
+                -- Second bind with same id but different content
+                sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo second")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy second")
+                    end,
+                })
+            "#,
+        )
+        .exec();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("duplicate bind id"),
+        "error should mention 'duplicate bind id': {}",
+        err
+      );
+      assert!(err.contains("my-bind"), "error should mention the id: {}", err);
+
+      Ok(())
+    }
+
+    #[test]
+    fn binds_without_id_can_have_different_content() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      // Two binds without IDs with different content should both be added
+      lua
+        .load(
+          r#"
+                sys.bind({
+                    create = function(inputs, ctx)
+                        ctx:exec("echo first")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy first")
+                    end,
+                })
+                sys.bind({
+                    create = function(inputs, ctx)
+                        ctx:exec("echo second")
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy second")
+                    end,
+                })
+            "#,
+        )
+        .exec()?;
+
+      let manifest = manifest.borrow();
+      // Both binds should be added since they have no ID (no conflict possible)
+      assert_eq!(manifest.bindings.len(), 2);
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_with_different_output_keys_fails() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        return { path = "/some/path" }
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        return { different_key = "/other/path" }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("update must return same output keys as create"),
+        "error should mention output key mismatch: {}",
+        err
+      );
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_with_same_output_keys_succeeds() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        return { path = "/some/path" }
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        return { path = "/updated/path" }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>()?;
+
+      let manifest = manifest.borrow();
+      assert_eq!(manifest.bindings.len(), 1);
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_with_nil_return_when_create_has_no_outputs() -> LuaResult<()> {
+      let (lua, manifest) = create_test_lua_with_manifest()?;
+
+      lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        -- no return (nil)
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        -- no return (nil)
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>()?;
+
+      let manifest = manifest.borrow();
+      assert_eq!(manifest.bindings.len(), 1);
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_returns_outputs_but_create_does_not_fails() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        -- no return
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        return { path = "/some/path" }
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("update returned outputs but create did not"),
+        "error should mention create has no outputs: {}",
+        err
+      );
+
+      Ok(())
+    }
+
+    #[test]
+    fn update_returns_nil_but_create_has_outputs_fails() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "my-bind",
+                    create = function(inputs, ctx)
+                        ctx:exec("echo create")
+                        return { path = "/some/path" }
+                    end,
+                    update = function(outputs, inputs, ctx)
+                        ctx:exec("echo update")
+                        -- no return (nil)
+                    end,
+                    destroy = function(outputs, ctx)
+                        ctx:exec("echo destroy")
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("update returned nil but create returned outputs"),
+        "error should mention create has outputs: {}",
+        err
+      );
 
       Ok(())
     }

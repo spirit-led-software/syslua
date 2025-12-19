@@ -472,14 +472,13 @@ mod tests {
   use crate::build::BuildDef;
   use crate::util::hash::Hashable;
 
-  fn make_build(name: &str, inputs: Option<BuildInputs>) -> BuildDef {
+  fn make_build(id: &str, inputs: Option<BuildInputs>) -> BuildDef {
     BuildDef {
-      name: name.to_string(),
-      version: None,
+      id: None,
       inputs,
-      apply_actions: vec![Action::Exec(ExecOpts {
+      create_actions: vec![Action::Exec(ExecOpts {
         bin: "echo".to_string(),
-        args: Some(vec![name.to_string()]),
+        args: Some(vec![id.to_string()]),
         env: None,
         cwd: None,
       })],
@@ -489,15 +488,17 @@ mod tests {
 
   fn make_bind(inputs: Option<BindInputs>) -> BindDef {
     BindDef {
+      id: None,
       inputs,
-      apply_actions: vec![Action::Exec(ExecOpts {
+      outputs: None,
+      create_actions: vec![Action::Exec(ExecOpts {
         bin: "echo".to_string(),
         args: Some(vec!["test".to_string()]),
         env: None,
         cwd: None,
       })],
-      outputs: None,
-      destroy_actions: None,
+      update_actions: None,
+      destroy_actions: vec![],
     }
   }
 
@@ -811,7 +812,7 @@ mod tests {
   #[test]
   fn execution_waves_parallel_mixed() {
     // Independent build A and bind B should be in the same wave
-    let build_a = make_build("a", None);
+    let build_a = make_build("build-a", None);
     let build_hash_a = build_a.compute_hash().unwrap();
 
     let bind_b = make_bind(None);

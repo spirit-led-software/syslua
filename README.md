@@ -1,63 +1,39 @@
-# sys.lua
+# SysLua
 
 **Declarative cross-platform system management with the simplicity of Lua and the power of Nix.**
 
-> **Note:** sys.lua is currently in the design phase. This README describes the target system. We're looking for contributors to help bring this vision to life.
+> **Note:** SysLua is currently in the design phase. This README describes the target system. We're looking for contributors to help bring this vision to life.
 
-## What is sys.lua?
+## What is SysLua?
 
-sys.lua reimagines system configuration management by combining three powerful ideas:
+SysLua is a cross-platform declarative system/environment manager inspired by Nix. It combines:
 
-1. **Declarative configuration** - Your `sys.lua` file is the single source of truth for your entire environment
-2. **Reproducibility** - Same config + same inputs = identical environment, every time
-3. **Simplicity** - No PhD required. Just Lua and straightforward concepts
+1. **Standard Lua idioms** - Plain tables, functions, `require()`. No magic, no DSL, no hidden behavior
+2. **Reproducibility** - Same config + same inputs = same environment, regardless of platform
+3. **Builds & Binds** - Two atomic building blocks upon which all user-facing APIs are built
 
 ```lua
-local M = {}
+-- SysLua modules are plain Lua modules
+local nginx = require('syslua.modules.services.nginx')
+nginx.setup({ port = 8080 })
 
--- Declare your inputs (external dependencies)
-M.inputs = {
-    pkgs = "git:https://github.com/syslua/pkgs.git",
-}
-
--- Configure your system
-function M.setup(inputs)
-    local pkgs = require("pkgs")
-    local lib = require("syslua.lib")
-
-    -- Install packages
-    pkgs.cli.ripgrep.setup()
-    pkgs.cli.neovim.setup({ version = "0.10.0" })
-
-    -- Configure your environment
-    env {
-        EDITOR = "nvim",
-        PATH = lib.mkBefore({ "$HOME/.local/bin" }),
-    }
-
-    -- Manage dotfiles
-    file {
-        path = "~/.gitconfig",
-        content = [[
-[user]
-    name = Your Name
-    email = you@example.com
-]],
-    }
-end
-
-return M
+-- No magic. Just:
+-- 1. require() returns a table
+-- 2. setup() is a function call
+-- 3. Options are plain tables
 ```
+
+If you know Lua, you know how to use SysLua.
 
 **Apply it:**
 
 ```bash
-$ sudo sys apply
+$ sys apply
 ```
 
-Your system now matches your declaration. Packages installed, environment configured, dotfiles in place.
+Your system now matches your declaration.
 
-## Why sys.lua?
+## Why SysLua?
 
 ### The Problem with Current Tools
 
@@ -65,235 +41,106 @@ Your system now matches your declaration. Packages installed, environment config
 
 **Nix** solves this brilliantly but has a steep learning curve: custom language, complex module system, and impenetrable error messages scare away newcomers.
 
-**sys.lua bridges this gap.**
+**SysLua bridges this gap.**
 
-### What Makes sys.lua Different
+### What Makes SysLua Different
 
-✨ **Lua instead of Nix language** - Familiar, widely-used, easy to learn  
-📦 **Prebuilt binaries first** - Install instantly without compilation  
-🔒 **Reproducible by default** - Lock files pin exact versions  
-👥 **Per-user configuration** - System and user-level configs coexist seamlessly  
-🎯 **Module system** - NixOS-style composability without the complexity  
-🌍 **True cross-platform** - Linux, macOS, and Windows as first-class citizens  
-🔐 **Built-in secrets management** - SOPS integration for sensitive data  
-⚡ **Fast and simple** - Content-addressed store with human-readable layout  
-🔄 **Atomic operations** - Apply succeeds completely or rolls back entirely
+- **Standard Lua idioms** - `require()` + `setup()`, plain tables for options, explicit function calls
+- **Prebuilt binaries first** - Install instantly without compilation
+- **Reproducible by default** - Lock files pin exact versions
+- **True cross-platform** - Linux, macOS, and Windows as first-class citizens
+- **Composable** - Builds can be built from other builds; binds can reference multiple builds
+- **Content-addressed store** - Immutable, deduplicated, human-readable layout
+- **Atomic operations** - Apply succeeds completely or rolls back entirely
+- **Small backend surface area** - Rust only handles Lua parsing, builds, binds, the store, and snapshots
+
+## The Two Primitives
+
+Everything in SysLua builds on two fundamental concepts:
+
+```
+Build (sys.build {})              Bind (sys.bind {})
+━━━━━━━━━━━━━━━━━━━━━━━━          ━━━━━━━━━━━━━━━━━━━━━━━━━━
+Describes HOW to produce          Describes WHAT TO DO with
+content for the store.            build output.
+
+- Fetch from URL                  - Run shell commands
+- Execute shell commands          - Create symlinks
+- Build from source               - Modify system state
+- Generate config file            - Enable services
+
+Output: immutable store object    Output: system side effects
+                                  which are journaled and can
+                                  be rolled back.
+```
+
+All modules are built using these two primitives. For example, a service module may define a build that compiles the service binary, and a bind that sets up the service to run on system startup.
+
+### The `exec` Action
+
+Both builds and binds use a flexible `exec` action for executing platform-specific operations:
+
+```lua
+-- Build context: execute commands during build
+local my_tool = sys.build({
+  id = 'my-tool',
+  inputs = {
+    make = require('syslua.modules.build_tools.make').setup(),
+  },
+  create = function(inputs, ctx)
+    local build_dir = ctx:exec({ bin = inputs.make.outputs.bin, cwd = '/build' })
+    ctx:exec({
+      bin = inputs.make.outputs.bin,
+      args = { 'install' },
+      env = { PREFIX = build_dir },
+    })
+  end,
+})
+
+-- Bind context: create and destroy are separate functions
+sys.bind({
+  inputs = {
+    tool = my_tool,
+  },
+  create = function(inputs, ctx)
+    local dest = '/usr/local/sbin/my-tool'
+    ctx:exec(string.format('ln -s "%s" "%s"', inputs.tool.outputs.bin, dest))
+    return { dest = dest }
+  end,
+  destroy = function(inputs, ctx)
+    ctx:exec(string.format('rm "%s"', inputs.dest))
+  end,
+})
+```
+
+This design provides maximum flexibility - the Lua configuration decides what commands to run for each platform, rather than relying on preset Rust-backed actions.
+
+### Why Builds + Binds?
+
+Separating build from deployment (bind) provides:
+
+- **Better caching** - Same content with different targets = one build, multiple binds
+- **Cleaner rollback** - Builds are immutable; only binds change
+- **Composability** - Multiple binds can reference the same build
+- **Clear semantics** - Build logic stays pure; side effects are explicit
 
 ## Key Features
 
-### 1. Declarative Package Management
-
-Packages are fetched from registries (like GitHub repos) and installed to an immutable store:
-
-```lua
-local M = {}
-
-M.inputs = {
-    -- Official registry (public)
-    pkgs = "git:https://github.com/syslua/pkgs.git",
-    -- Private registry (SSH - uses ~/.ssh/ keys)
-    company = "git:git@github.com:mycompany/internal-pkgs.git",
-}
-
-function M.setup(inputs)
-    local pkgs = require("inputs.pkgs")
-
-    -- Use latest stable version
-    pkgs.cli.ripgrep.setup()
-
-    -- Pin specific version
-    pkgs.cli.nodejs.setup({ version = "18.20.0" })
-end
-
-return M
-```
-
-### 2. User-Scoped Configuration
-
-System-level and user-level configurations coexist seamlessly. Each user gets their own isolated environment while sharing system packages:
-
-```lua
-local M = {}
-
-M.inputs = {
-    pkgs = "git:https://github.com/syslua/pkgs.git",
-}
-
-function M.setup(inputs)
-    local pkgs = require("inputs.pkgs")
-    local lib = require("syslua.lib")
-
-    -- System-level packages (available to all users)
-    pkgs.cli.git.setup()
-    pkgs.cli.curl.setup()
-
-    -- Per-user configuration
-    user {
-        name = "ian",
-        config = function()
-            -- User-scoped packages (only in ian's PATH)
-            pkgs.cli.neovim.setup()
-            pkgs.cli.ripgrep.setup()
-
-            -- User-scoped dotfiles
-            file {
-                path = "~/.gitconfig",
-                content = [[
-[user]
-    name = Ian
-    email = ian@example.com
-]],
-            }
-
-            -- User-scoped environment
-            env {
-                EDITOR = "nvim",
-                PATH = lib.mkBefore({ "$HOME/.local/bin" }),
-            }
-        end,
-    }
-
-    user {
-        name = "admin",
-        config = function()
-            pkgs.cli.htop.setup()
-            pkgs.cli.docker.setup()
-        end,
-    }
-end
-
-return M
-```
-
-**Each user sources their own environment:**
-
-```bash
-# In ~/.bashrc or ~/.zshrc
-[ -f ~/.local/share/sys/env.sh ] && source ~/.local/share/sys/env.sh
-[ -f ~/.local/share/sys/users/ian/env.sh ] && source ~/.local/share/sys/users/ian/env.sh
-```
-
-### 3. Reproducible Environments
+### Reproducible Environments
 
 Lock files ensure your team uses identical package versions:
 
 ```bash
 # Developer A: Add packages and commit lock file
-$ sudo sys apply # Creates syslua.lock
+$ sys apply # Creates syslua.lock
 $ git add . && git commit
 
 # Developer B: Get exact same versions
 $ git pull
-$ sudo sys apply # Uses pinned versions from syslua.lock
+$ sys apply # Uses pinned versions from syslua.lock
 ```
 
-### 4. NixOS-Style Modules
-
-Reusable, composable configuration modules following standard Lua patterns:
-
-```lua
--- modules/services/docker.lua
-local M = {}
-
-M.options = {
-	rootless = true,
-}
-
-function M.setup(opts)
-	opts = opts or {}
-	for k, v in pairs(M.options) do
-		if opts[k] == nil then
-			opts[k] = v
-		end
-	end
-
-	require("pkgs.cli.docker").setup()
-	require("pkgs.cli.docker-compose").setup()
-
-	-- Service configuration via derive/activate
-	local service_drv = derive({
-		name = "docker-service",
-		opts = function(sys)
-			return { rootless = opts.rootless, sys = sys }
-		end,
-		config = function(o, ctx)
-			if o.sys.os == "linux" then
-				ctx.write(ctx.out .. "/docker.service", generate_systemd_unit(o))
-			end
-		end,
-	})
-
-	activate({
-		opts = function(sys)
-			return { drv = service_drv, sys = sys }
-		end,
-		config = function(o, ctx)
-			if o.sys.os == "linux" then
-				ctx.symlink(o.drv.out .. "/docker.service", "/etc/systemd/system/docker.service")
-				ctx.enable_service("docker")
-			end
-		end,
-	})
-
-	return M
-end
-
-return M
-```
-
-```lua
--- init.lua
-require("modules.services.docker").setup({ rootless = false })
-```
-
-### 5. Priority-Based Conflict Resolution
-
-When multiple declarations conflict, priorities determine the winner:
-
-```lua
--- Default value (can be overridden)
-env({ EDITOR = lib.mkDefault("vim") })
-
--- User override (higher priority)
-env({ EDITOR = lib.mkForce("nvim") })
-
--- Mergeable values combine instead of conflict
-env({ PATH = lib.mkBefore({ "$HOME/.cargo/bin" }) })
-env({ PATH = lib.mkAfter({ "/usr/local/games" }) })
--- Result: $HOME/.cargo/bin:$PATH:/usr/local/games
-```
-
-### 6. Built-in Secrets Management
-
-For private repositories, **SSH is recommended** (uses existing `~/.ssh/` keys):
-
-```lua
-M.inputs = {
-    -- SSH URLs - no secrets to manage
-    company = "git:git@github.com:mycompany/private-pkgs.git",
-}
-```
-
-For HTTPS-only environments, SOPS integration keeps credentials secure:
-
-```yaml
-# secrets.yaml (encrypted with age/GPG)
-github_token: ENC[AES256_GCM,data:...,tag:...]
-```
-
-```lua
-local secrets = sops.load("./secrets.yaml")
-
-M.inputs = {
-    -- HTTPS with token (fallback for CI/restricted networks)
-    company = {
-        url = "git:https://github.com/mycompany/private-pkgs.git",
-        auth = secrets.github_token,
-    },
-}
-```
-
-### 7. Atomic Rollbacks
+### Atomic Rollbacks
 
 Every `sys apply` creates a snapshot. Rollback instantly if something breaks:
 
@@ -304,123 +151,141 @@ Snapshots:
 #4  2024-12-07 09:15  Updated neovim to 0.10.0
 #3  2024-12-06 18:42  Initial system config
 
-$ sudo sys rollback 4 # Instant rollback to snapshot #4
+$ sys rollback 4 # Instant rollback to snapshot #4
 ```
 
-### 8. Cross-Platform
+### Cross-Platform
 
-First-class support for Linux, macOS, and Windows:
+First-class support for Linux, macOS, and Windows. Platform-specific logic lives in Lua:
 
 ```lua
--- Platform-specific behavior using syslua globals
-if syslua.is_linux then
-    require("pkgs.cli.xclip").setup()
-elseif syslua.is_darwin then
-    -- pbcopy is built-in on macOS
-elseif syslua.is_windows then
-    -- clip is built-in on Windows
-end
-
--- Packages handle platform differences internally
-require("pkgs.cli.ripgrep").setup({ version = "15.1.0" })
--- The package module uses syslua.platform to fetch the correct binary
+-- Platform-specific behavior in the exec action
+sys.bind({
+  inputs = { tool = my_tool },
+  create = function(inputs, ctx)
+    if syslua.is_linux then
+      ctx:exec('systemctl enable my-tool')
+    elseif syslua.is_darwin then
+      ctx:exec('launchctl load /Library/LaunchDaemons/my-tool.plist')
+    end
+  end,
+})
 ```
 
-## Architecture Highlights
+## Architecture
 
-### The Two Primitives
-
-Everything in sys.lua builds on two fundamental concepts:
+### High-Level Flow
 
 ```
-Derivation (derive {})          Activation (activate {})
-━━━━━━━━━━━━━━━━━━━━━━━━       ━━━━━━━━━━━━━━━━━━━━━━━━━━
-Describes HOW to produce        Describes WHAT TO DO with
-content for the store.          derivation output.
-
-- Fetch from URL                - Add to PATH
-- Clone git repo                - Create symlink
-- Build from source             - Source in shell
-- Generate config file          - Enable service
-
-Output: immutable store object  Output: system side effects
+┌─────────────────────────────────────────────────────────┐
+│                  User Config (init.lua)                  │
+│  - Declares packages, files, env vars, services         │
+│  - Uses Lua for logic and composition                   │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                Evaluation & Resolution                   │
+│  - Resolve inputs from lock file                        │
+│  - Parse Lua → Manifest                                 │
+│  - Priority-based conflict resolution                   │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                  DAG Construction                        │
+│  - Build execution graph from manifest                  │
+│  - Topological sort, cycle detection                    │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                 Parallel Execution                       │
+│  - Realize builds → store objects                       │
+│  - Execute binds → system side effects                  │
+│  - Atomic: all-or-nothing with rollback                 │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                   Immutable Store                        │
+│  build/<hash>/      Content-addressed objects           │
+│  bind/<hash>/       Bind state tracking                 │
+└─────────────────────────────────────────────────────────┘
 ```
-
-All user-facing APIs (`file {}`, `env {}`, package `setup()`) internally create derivations and activations.
 
 ### Content-Addressed Store
 
-Packages are stored immutably with human-readable naming:
+Packages are stored immutably with content-addressed hashing (20-char truncated hash):
 
 ```
 /syslua/store/
-├── obj/<name>-<version>-<hash>/  # Immutable content (e.g., ripgrep-15.1.0-abc123def/)
+├── build/<hash>/     # Immutable content (e.g., build/abc123def456789012ab/)
 │   └── bin/rg
-├── pkg/ripgrep/15.1.0/x86_64-linux/  # Human-readable symlink → obj/
-├── drv/<hash>.drv                    # Serialized derivation descriptions
-└── drv-out/<hash>                    # Maps derivation hash → output hash
+├── bind/<hash>/      # Bind state tracking
+└── ...
 ```
 
-### Dependency Graph (DAG)
+### Rust Surface Area
 
-sys.lua builds an execution graph to parallelize operations and handle dependencies:
+The Rust implementation is intentionally minimal:
 
-```
-┌──────────┐     ┌──────────┐
-│ ripgrep  │     │  neovim  │
-└──────────┘     └────┬─────┘
-                      │ depends_on
-                      ▼
-                ┌────────────┐
-                │ init.lua   │
-                └────────────┘
-```
+| Component       | Purpose                                 |
+| --------------- | --------------------------------------- |
+| **Builds**      | Hashing, realization, build context     |
+| **Binds**       | Execution of system side effects        |
+| **Store**       | Content-addressed storage, immutability |
+| **Lua parsing** | Config evaluation via mlua              |
+| **Snapshots**   | History and rollback                    |
 
-### Flakes-Style Inputs
+### Why Content-Addressed Storage?
 
-No centralized registry to sync. Declare your package sources in `M.inputs`:
+- **Deduplication** - Same content = same hash = stored once
+- **Reproducibility** - Hash guarantees identical content
+- **Safe rollback** - Old versions remain in store until GC
+- **Parallel safety** - No conflicts from concurrent operations
 
-```lua
-local M = {}
+### Why Lua?
 
-M.inputs = {
-    -- Official registry (HTTPS - public)
-    pkgs = "git:https://github.com/syslua/pkgs.git",
+- **Familiar syntax** - Easy to read and write
+- **Powerful** - First-class functions, tables for configuration
+- **Safe** - No arbitrary system access from config
+- **Embeddable** - mlua provides excellent Rust integration
 
-    -- Unstable channel
-    unstable = "git:https://github.com/syslua/pkgs.git#unstable",
+### Why `exec` Instead of Preset Actions?
 
-    -- Private corporate registry (SSH - recommended)
-    company = "git:git@github.com:mycompany/pkgs.git",
+The `exec` action provides maximum flexibility:
 
-    -- Local development
-    local_pkgs = "path:./my-packages",
-}
+- **Platform-specific** - Lua config decides what commands to run per platform
+- **No Rust changes** - Adding new operations doesn't require Rust code changes
+- **Transparent** - Users can see exactly what commands will be executed
+- **Composable** - Complex operations built from simple shell commands
 
-function M.setup(inputs)
-    local pkgs = require("inputs.pkgs")
-    local company = require("inputs.company")
+## Terminology
 
-    pkgs.cli.ripgrep.setup()
-    company.internal_tool.setup()
-end
-
-return M
-```
+| Term            | Definition                                                       |
+| --------------- | ---------------------------------------------------------------- |
+| **Build**       | Immutable description of how to produce store content            |
+| **Bind**        | Description of what to do with build output                      |
+| **Store**       | Global, immutable location for package content (`/syslua/store`) |
+| **Store Build** | Content-addressed directory in `store/build/<hash>/`             |
+| **Manifest**    | Intermediate representation from evaluating Lua config           |
+| **Snapshot**    | Point-in-time capture of builds + binds                          |
+| **Input**       | Declared source of packages (GitHub repo, local path, Git URL)   |
 
 ## Project Status
 
-**sys.lua is currently in the design and architecture phase.** We have:
+**SysLua is currently in the design and architecture phase.** We have:
 
-- Comprehensive architecture documentation (see [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md))
-- Split architecture docs covering [derivations](./docs/architecture/01-derivations.md), [activations](./docs/architecture/02-activations.md), [store](./docs/architecture/03-store.md), [Lua API](./docs/architecture/04-lua-api.md), and more
-- Crate structure defined (`sys-cli`, `sys-core`, `sys-lua`, `sys-platform`, `sys-sops`)
+- Comprehensive architecture documentation (see [docs/architecture/](./docs/architecture/))
+- Split architecture docs covering [builds](./docs/architecture/01-builds.md), [binds](./docs/architecture/02-binds.md), [store](./docs/architecture/03-store.md), [Lua API](./docs/architecture/04-lua-api.md), and more
+- Crate structure defined (`syslua-cli`, `syslua-lib`)
 - Clear design philosophy and feature roadmap
 - Implementation in progress
 
 ## Getting Involved
 
-We're actively seeking contributors to help build sys.lua. Here's how you can help:
+We're actively seeking contributors to help build SysLua. Here's how you can help:
 
 ### For Developers
 
@@ -431,22 +296,22 @@ We're actively seeking contributors to help build sys.lua. Here's how you can he
 
 ### For Early Adopters
 
-- **Feedback**: Review the [architecture docs](./docs/ARCHITECTURE.md) and share thoughts
-- **Use cases**: Tell us about your workflow and how sys.lua could help
+- **Feedback**: Review the [architecture docs](./docs/architecture/) and share thoughts
+- **Use cases**: Tell us about your workflow and how SysLua could help
 - **Testing**: Try early releases and report issues
 
 ### Getting Started
 
 ```bash
 # Clone the repository
-$ git clone https://github.com/sys-lua/sys.lua.git
-$ cd sys.lua
+$ git clone https://github.com/syslua/syslua.git
+$ cd syslua
 
-# Build the project (once implemented)
+# Build the project
 $ cargo build --release
 
 # Read the architecture
-$ cat docs/ARCHITECTURE.md
+$ cat docs/architecture/00-overview.md
 
 # Check contributor guidelines
 $ cat AGENTS.md
@@ -454,17 +319,21 @@ $ cat AGENTS.md
 
 ## Design Principles
 
-sys.lua is guided by these core principles:
+SysLua is guided by these core principles:
 
-1. **Declarative Configuration** - Config file is the single source of truth
-2. **Reproducibility** - Same config = same environment, always
-3. **Immutability** - Package contents never change after installation
-4. **Simplicity** - Prebuilt binaries, human-readable store, straightforward Lua
-5. **Cross-platform** - Linux, macOS, Windows as equals
+1. **Standard Lua Idioms** - Plain tables, functions, `require()`. No magic, no DSL
+2. **Reproducibility** - Same config + same inputs = same environment
+3. **Builds & Binds** - Two atomic building blocks for all operations
+4. **Immutability** - Store objects are immutable and content-addressed
+5. **Declarative** - The Lua config file is the single source of truth
+6. **Simplicity** - Prebuilt binaries when available, human-readable store layout
+7. **Cross-platform** - Linux, macOS, Windows as first-class citizens
+8. **Small backend surface area** - Rust handles only the essentials
+9. **Composability** - Builds from builds; binds reference multiple builds
 
 ## Inspiration
 
-sys.lua stands on the shoulders of giants:
+SysLua stands on the shoulders of giants:
 
 - **Nix/NixOS** - Reproducibility, immutability, declarative config
 - **Home Manager** - User-level configuration management
@@ -475,62 +344,44 @@ We're taking the best ideas from these projects and making them accessible to ev
 
 ## Comparison
 
-| Feature            | sys.lua      | Nix          | Ansible    | Homebrew   |
-| ------------------ | ------------ | ------------ | ---------- | ---------- |
-| Declarative        | ✅           | ✅           | ✅         | ❌         |
-| Reproducible       | ✅           | ✅           | ⚠️ Partial | ❌         |
-| Rollback           | ✅           | ✅           | ❌         | ❌         |
-| Cross-platform     | ✅           | ⚠️ Partial   | ✅         | macOS only |
-| Easy to learn      | ✅           | ❌           | ✅         | ✅         |
-| Prebuilt binaries  | ✅ (default) | ⚠️ Sometimes | N/A        | ✅         |
-| Immutable store    | ✅           | ✅           | ❌         | ❌         |
-| Secrets management | ✅ (SOPS)    | ⚠️ External  | ✅ (Vault) | ❌         |
-| Module system      | ✅           | ✅           | ✅ (roles) | ❌         |
+| Feature           | SysLua        | Nix       | Ansible    | Homebrew   |
+| ----------------- | ------------- | --------- | ---------- | ---------- |
+| Declarative       | Yes           | Yes       | Yes        | No         |
+| Reproducible      | Yes           | Yes       | Partial    | No         |
+| Rollback          | Yes           | Yes       | No         | No         |
+| Cross-platform    | Yes           | Partial   | Yes        | macOS only |
+| Easy to learn     | Yes           | No        | Yes        | Yes        |
+| Prebuilt binaries | Yes (default) | Sometimes | N/A        | Yes        |
+| Immutable store   | Yes           | Yes       | No         | No         |
+| Standard language | Yes (Lua)     | No (Nix)  | Yes (YAML) | N/A        |
 
 ## License
 
-[To be determined - waiting for project maintainer decision]
+MIT License - see [LICENSE](./LICENSE)
 
 ## Community
 
-- **GitHub Discussions**: [Share ideas and ask questions](https://github.com/sys-lua/sys.lua/discussions)
-- **Issues**: [Report bugs and request features](https://github.com/sys-lua/sys.lua/issues)
-- **Discord**: [Join the community](https://discord.gg/sys-lua) _(coming soon)_
+- **GitHub Issues**: [Report bugs and request features](https://github.com/syslua/syslua/issues)
 
-## Roadmap
+## Documentation
 
-See [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the complete technical roadmap.
+See the [architecture documentation](./docs/architecture/) for detailed design:
 
-**Phase 1 - Foundation** (Current)
-
-- [ ] Core Rust crates structure
-- [ ] Lua runtime integration
-- [ ] Store implementation
-- [ ] Package installation/removal
-
-**Phase 2 - Essential Features**
-
-- [ ] Lock file support
-- [ ] Input resolution
-- [ ] DAG execution
-- [ ] Snapshot/rollback
-
-**Phase 3 - Advanced Features**
-
-- [ ] Module system
-- [ ] SOPS integration
-- [ ] Service management
-- [ ] Shell completions
-
-**Phase 4 - Ecosystem**
-
-- [ ] Official package registry
-- [ ] Documentation site
-- [ ] Tutorial series
-- [ ] Community modules
+| Document                                                 | Content                                       |
+| -------------------------------------------------------- | --------------------------------------------- |
+| [00-overview.md](./docs/architecture/00-overview.md)     | Architecture overview, core values            |
+| [01-builds.md](./docs/architecture/01-builds.md)         | Build system, context API, hashing            |
+| [02-binds.md](./docs/architecture/02-binds.md)           | Bind types, execution, examples               |
+| [03-store.md](./docs/architecture/03-store.md)           | Store layout, realization, immutability       |
+| [04-lua-api.md](./docs/architecture/04-lua-api.md)       | Lua API layers, globals, type definitions     |
+| [05-snapshots.md](./docs/architecture/05-snapshots.md)   | Snapshot design, rollback, garbage collection |
+| [06-inputs.md](./docs/architecture/06-inputs.md)         | Input sources, registry, lock files           |
+| [07-modules.md](./docs/architecture/07-modules.md)       | Module system                                 |
+| [08-apply-flow.md](./docs/architecture/08-apply-flow.md) | Apply flow, DAG execution, atomicity          |
+| [09-platform.md](./docs/architecture/09-platform.md)     | Platform-specific: services, env, paths       |
 
 ---
 
-**sys.lua** - System management that makes sense.
+**SysLua** - System management that makes sense.
 
 _Declarative. Reproducible. Simple._

@@ -14,17 +14,16 @@ All managed state in sys.lua uses builds - not just packages, but also files and
 
 ```lua
 local my_build = sys.build({
-  name = "ripgrep",           -- Required: identifier for debugging/logging
-  version = "15.1.0",         -- Optional: human-readable version
+  id = "ripgrep-15.1.0",         -- Optional: identifier for debugging/logging
 
   inputs = <table | function()>,  -- Optional: input specification
-  apply = function(inputs, ctx),  -- Required: build logic
+  create = function(inputs, ctx), -- Required: build logic
 })
 ```
 
 ## Inputs (`inputs`)
 
-Inputs can be a static table or a function for platform-specific resolution. **Inputs are arbitrary data** - there is no magic interpretation. The `config` function consumes this data and uses `ctx` helpers as needed.
+Inputs can be a static table or a function for platform-specific resolution. **Inputs are arbitrary data** - there is no magic interpretation. The `create` function consumes this data and uses `ctx` helpers as needed.
 
 ```lua
 -- Static table (simple case)
@@ -52,32 +51,33 @@ end
 Inputs can include other builds for build dependencies:
 
 ```lua
-local rust = sys.build({ name = "rust", ... })
+local rust = sys.build({ id = "rust", ... })
 
 sys.build({
-  name = "ripgrep",
+  id = "ripgrep",
   inputs = function()
     return {
       src_url = "...",
       rust = rust,  -- Build reference
     }
   end,
-  apply = function(inputs, ctx)
+  create = function(inputs, ctx)
     -- inputs.rust.outputs.out is the realized output path of the rust build
     ctx:exec({
-      cmd = "cargo build --release",
+      bin = "cargo",
+      args = { "build", "--release" },
       env = { PATH = inputs.rust.outputs.out .. "/bin:" .. os.getenv("PATH") },
     })
   end,
 })
 ```
 
-## Apply Function
+## Create Function
 
-The apply function transforms inputs into outputs:
+The create function transforms inputs into outputs:
 
 ```lua
-apply = function(inputs, ctx)
+create = function(inputs, ctx)
   -- inputs: the table returned by inputs function (build refs have .outputs paths)
   -- ctx: build context with helpers
 end
@@ -85,15 +85,18 @@ end
 
 ## Build Context (`BuildCtx`)
 
-The build context provides actions for fetching and shell execution. Each action returns an opaque string that can be stored and used in subsequent commands.
+The build context provides actions for fetching, file writing, and shell execution. Each action returns an opaque string that can be stored and used in subsequent commands.
 
 ```lua
 -- Fetch operations (returns opaque reference to downloaded file)
 ctx:fetch_url(url, sha256)  -- Download file, verify hash
 
+-- File operations (returns opaque reference to written file)
+ctx:write_file(path, contents)  -- Write contents to file
+
 -- Shell execution (returns opaque reference to stdout)
-ctx:exec(opts)               -- Execute a shell command
-                            -- opts: string | { bin, env?, cwd? }
+ctx:exec(opts)               -- Execute a command
+                            -- opts: string | { bin, args?, env?, cwd? }
 ```
 
 ### The `exec` Action
@@ -101,12 +104,13 @@ ctx:exec(opts)               -- Execute a shell command
 The `exec` action is the primary mechanism for executing operations during a build. This flexible approach allows Lua configuration to specify platform-specific commands rather than relying on preset Rust-backed actions:
 
 ```lua
--- Simple command (string)
+-- Simple command (string) - bin only, no args
 ctx:exec("make")
 
 -- Command with options (table)
 ctx:exec({
-  bin = "make install",
+  bin = "make",
+  args = { "install" },
   cwd = "/build/src",
   env = { PREFIX = ctx.out },
 })
@@ -116,7 +120,8 @@ ctx:exec({
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `bin` | string | Required: the shell command to execute |
+| `bin` | string | Required: the binary/command to execute |
+| `args` | string[]? | Optional: arguments to pass to the command |
 | `cwd` | string? | Optional: working directory for the command |
 | `env` | table<string,string>? | Optional: environment variables for the command |
 
@@ -129,15 +134,29 @@ ctx:exec({
 
 **Error handling:** All `ctx` operations throw on failure (Lua `error()`). A failed build leaves the user-facing system unchanged - atomic apply semantics ensure the pre-apply state is restored.
 
+### The `write_file` Action
+
+The `write_file` action creates or overwrites a file with specified contents:
+
+```lua
+-- Write a configuration file
+ctx:write_file(ctx.out .. "/config.json", '{"debug": false}')
+
+-- Write a shell script
+ctx:write_file(ctx.out .. "/bin/setup.sh", [[
+#!/bin/bash
+echo "Setting up..."
+]])
+```
+
 ## Build Return Value
 
 `sys.build {}` returns a table representing the build AND registers it globally. The registration happens on require - users can conditionally require modules for platform-specific packages.
 
 ```lua
-local rg = sys.build { name = "ripgrep", outputs = {"out"}, ... }
+local rg = sys.build { id = "ripgrep", outputs = {"out"}, ... }
 
-rg.name           -- "ripgrep"
-rg.version        -- "15.1.0" or nil
+rg.id             -- "ripgrep" or nil
 rg.hash           -- Build hash (computed at evaluation time)
 rg.outputs        -- { out = <realized-store-output-path> }
 ```
@@ -146,10 +165,9 @@ rg.outputs        -- { out = <realized-store-output-path> }
 
 The build hash is a 20-character truncated SHA-256, computed from the serialized `BuildDef`:
 
-- `name`
-- `version` (if present)
-- `inputs` (evaluated `InputsRef` - see below)
-- `apply_actions` (the commands and fetch operations)
+- `id` (if present)
+- `inputs` (evaluated `BuildInputs` - see below)
+- `create_actions` (the commands and fetch operations)
 - `outputs` (if present)
 
 This means:
@@ -159,9 +177,9 @@ This means:
 - Build dependencies are included via their hash in inputs
 - Action order matters - same actions in different order = different hash
 
-### InputsRef and Build Dependencies
+### BuildInputs and Build Dependencies
 
-When a build references another build in its inputs, the `InputsRef` stores only the referenced build's hash (not the full definition). This ensures:
+When a build references another build in its inputs, the `BuildInputs` stores only the referenced build's hash (not the full definition). This ensures:
 
 - **Efficient hashing**: Build hashes depend on dependency hashes, not full definitions
 - **Deduplication**: Same dependency = same hash regardless of how it's referenced
@@ -169,14 +187,13 @@ When a build references another build in its inputs, the `InputsRef` stores only
 
 ```rust
 /// Evaluated inputs (serializable)
-pub enum InputsRef {
+pub enum BuildInputs {
     String(String),
     Number(f64),
     Boolean(bool),
-    Table(BTreeMap<String, InputsRef>),
-    Array(Vec<InputsRef>),
-    Build(BuildHash),  // Just the 20-char hash, not full BuildRef
-    Bind(BindHash),    // Just the 20-char hash, not full BindRef
+    Table(BTreeMap<String, BuildInputs>),
+    Array(Vec<BuildInputs>),
+    Build(ObjectHash),  // Just the 20-char hash, not full BuildRef
 }
 ```
 
@@ -188,57 +205,11 @@ The build system uses a two-tier type architecture:
 - **Def** - Evaluated, serializable, stored in Manifest (keyed by truncated hash)
 
 ```rust
-/// Hash for content-addressing builds (20-char truncated SHA-256)
-pub struct BuildHash(pub String);
-
 /// Actions that can be performed during a build
-pub enum BuildAction {
+pub enum Action {
     FetchUrl { url: String, sha256: String },
-    Cmd {
-        cmd: String,
-        env: Option<BTreeMap<String, String>>,
-        cwd: Option<String>,
-    },
-}
-
-/// Lua-side specification (not serializable, contains closures)
-pub struct BuildSpec {
-    pub name: String,
-    pub version: Option<String>,
-    pub inputs: Option<InputsSpec>,
-    pub apply: Function,  // Lua closure
-}
-
-/// Evaluated definition (serializable, stored in Manifest)
-pub struct BuildDef {
-    pub name: String,
-    pub version: Option<String>,
-    pub inputs: Option<InputsRef>,
-    pub apply_actions: Vec<BuildAction>,
-    pub outputs: Option<BTreeMap<String, String>>,
-}
-
-impl BuildDef {
-    /// Compute the truncated hash for use as manifest key.
-    pub fn compute_hash(&self) -> Result<BuildHash, serde_json::Error>;
-}
-
-/// Build context provided to apply function
-pub struct BuildCtx {
-    actions: Vec<BuildAction>,
-}
-
-impl BuildCtx {
-    /// Fetch a URL with hash verification, returns an opaque reference
-    /// that resolves to the downloaded file path at execution time
-    pub fn fetch_url(&mut self, url: &str, sha256: &str) -> String;
-    
-    /// Execute a command, returns an opaque reference
-    /// that resolves to the command's stdout at execution time
-    pub fn exec(&mut self, opts: impl Into<ExecOpts>) -> String;
-    
-    /// Consume context and return accumulated actions
-    pub fn into_actions(self) -> Vec<BuildAction>;
+    WriteFile { path: String, contents: String },
+    Exec(ExecOpts),
 }
 
 /// Command options for build and bind actions
@@ -248,21 +219,59 @@ pub struct ExecOpts {
     pub env: Option<BTreeMap<String, String>>,
     pub cwd: Option<String>,
 }
+
+/// Evaluated definition (serializable, stored in Manifest)
+pub struct BuildDef {
+    pub id: Option<String>,
+    pub inputs: Option<BuildInputs>,
+    pub outputs: Option<BTreeMap<String, String>>,
+    pub create_actions: Vec<Action>,
+}
+
+impl BuildDef {
+    /// Compute the truncated hash for use as manifest key.
+    pub fn compute_hash(&self) -> Result<ObjectHash, serde_json::Error>;
+}
+
+/// Build context provided to create function
+pub struct BuildCtx {
+    actions: Vec<Action>,
+}
+
+impl BuildCtx {
+    /// Returns a placeholder that resolves to the build's output directory
+    pub fn out(&self) -> &'static str;
+    
+    /// Fetch a URL with hash verification, returns an opaque reference
+    /// that resolves to the downloaded file path at execution time
+    pub fn fetch_url(&mut self, url: &str, sha256: &str) -> String;
+    
+    /// Write contents to a file, returns an opaque reference
+    /// that resolves to the file path at execution time
+    pub fn write_file(&mut self, path: &str, contents: &str) -> String;
+    
+    /// Execute a command, returns an opaque reference
+    /// that resolves to the command's stdout at execution time
+    pub fn exec(&mut self, opts: impl Into<ExecOpts>) -> String;
+    
+    /// Consume context and return accumulated actions
+    pub fn into_actions(self) -> Vec<Action>;
+}
 ```
 
-Note: `BuildRef` is not a separate Rust struct - it's a Lua table with a metatable that provides the build's `name`, `version`, `hash`, `inputs`, and `outputs` fields.
+Note: `BuildRef` is not a separate Rust struct - it's a Lua table with a metatable that provides the build's `id`, `hash`, `inputs`, and `outputs` fields.
 
 ### Placeholder System
 
-Both `fetch_url` and `exec` return opaque strings that can be stored in variables and used in subsequent commands. These are resolved during execution when action outputs become available.
+Both `fetch_url`, `write_file`, and `exec` return opaque strings that can be stored in variables and used in subsequent commands. These are resolved during execution when action outputs become available.
 
 ```lua
-apply = function(inputs, ctx)
+create = function(inputs, ctx)
   -- fetch_url returns an opaque reference to the downloaded file
   local archive = ctx:fetch_url(inputs.src.url, inputs.src.sha256)
   
   -- Use the reference in the next command - it resolves to the actual path at runtime
-  ctx:exec({ bin = "tar -xzf " .. archive .. " -C /build" })
+  ctx:exec({ bin = "tar", args = { "-xzf", archive, "-C", "/build" } })
 end
 ```
 
@@ -279,8 +288,7 @@ local hashes = {
 }
 
 local ripgrep = sys.build({
-  name = 'ripgrep',
-  version = '15.1.0',
+  id = 'ripgrep-15.1.0',
 
   inputs = function()
     return {
@@ -291,9 +299,9 @@ local ripgrep = sys.build({
     }
   end,
 
-  apply = function(inputs, ctx)
+  create = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.src.url, inputs.src.sha256)
-    ctx:exec({ bin = "tar -xzf " .. archive .. " -C " .. ctx.out })
+    ctx:exec({ bin = "tar", args = { "-xzf", archive, "-C", ctx.out } })
     return { out = ctx.out }
   end,
 })
@@ -302,11 +310,10 @@ local ripgrep = sys.build({
 ### Build from Source
 
 ```lua
-local rust = sys.build({ name = 'rust', ... })
+local rust = sys.build({ id = 'rust', ... })
 
 local ripgrep = sys.build({
-  name = 'ripgrep',
-  version = '15.1.0',
+  id = 'ripgrep-15.1.0',
 
   inputs = function()
     return {
@@ -317,19 +324,21 @@ local ripgrep = sys.build({
     }
   end,
 
-  apply = function(inputs, ctx)
+  create = function(inputs, ctx)
     ctx:exec({
-      cmd = 'git clone --depth 1 --branch ' .. inputs.rev .. ' ' .. inputs.git_url .. ' /tmp/rg-src',
+      bin = 'git',
+      args = { 'clone', '--depth', '1', '--branch', inputs.rev, inputs.git_url, '/tmp/rg-src' },
     })
 
     ctx:exec({
-      cmd = 'cargo build --release',
+      bin = 'cargo',
+      args = { 'build', '--release' },
       cwd = '/tmp/rg-src',
       env = { PATH = inputs.rust.outputs.out .. '/bin:' .. os.getenv('PATH') },
     })
 
-    ctx:exec({ bin = 'mkdir -p ' .. ctx.out .. '/bin' })
-    ctx:exec({ bin = 'cp /tmp/rg-src/target/release/rg ' .. ctx.out .. '/bin/rg' })
+    ctx:exec({ bin = 'mkdir', args = { '-p', ctx.out .. '/bin' } })
+    ctx:exec({ bin = 'cp', args = { '/tmp/rg-src/target/release/rg', ctx.out .. '/bin/rg' } })
     return { out = ctx.out }
   end,
 })
@@ -339,7 +348,7 @@ local ripgrep = sys.build({
 
 ```lua
 sys.build({
-  name = 'my-tool',
+  id = 'my-tool',
 
   inputs = function()
     return {
@@ -348,19 +357,21 @@ sys.build({
     }
   end,
 
-  apply = function(inputs, ctx)
+  create = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.url, inputs.sha256)
-    ctx:exec({ bin = 'tar -xzf ' .. archive .. ' -C ' .. ctx.out })
+    ctx:exec({ bin = 'tar', args = { '-xzf', archive, '-C', ctx.out } })
 
     if sys.os == 'darwin' then
       -- macOS-specific post-processing
       ctx:exec({
-        cmd = 'install_name_tool -id @rpath/libfoo.dylib ' .. ctx.out .. '/lib/libfoo.dylib'
+        bin = 'install_name_tool',
+        args = { '-id', '@rpath/libfoo.dylib', ctx.out .. '/lib/libfoo.dylib' },
       })
     elseif sys.os == 'linux' then
       -- Linux-specific
       ctx:exec({
-        cmd = "patchelf --set-rpath '$ORIGIN' " .. ctx.out .. '/lib/libfoo.so'
+        bin = 'patchelf',
+        args = { '--set-rpath', '$ORIGIN', ctx.out .. '/lib/libfoo.so' },
       })
     end
 
@@ -373,29 +384,33 @@ sys.build({
 
 Every `lib.file.setup()` and `lib.env.setup()` declaration internally creates a build:
 
+> **Note:** To use `lib.file` and `lib.env`, you must first `require('syslua.modules')`.
+
 ### File Builds
 
 ```lua
+local modules = require('syslua.modules')
+
 -- User writes:
-lib.file.setup({ path = '~/.gitconfig', source = './dotfiles/gitconfig' })
+modules.file.setup({ path = '~/.gitconfig', source = './dotfiles/gitconfig' })
 
 -- Internally becomes:
 local file_build = sys.build({
-  name = 'file-gitconfig',
+  id = 'file-gitconfig',
   inputs = { source = './dotfiles/gitconfig' },
-  apply = function(inputs, ctx)
-    ctx:exec({ bin = 'cp ' .. inputs.source .. ' ' .. ctx.out .. '/content' })
+  create = function(inputs, ctx)
+    ctx:exec({ bin = 'cp', args = { inputs.source, ctx.out .. '/content' } })
     return { out = ctx.out }
   end,
 })
 
 sys.bind({
   inputs = { build = file_build, target = '~/.gitconfig' },
-  apply = function(inputs, ctx)
-    ctx:exec('ln -sf ' .. inputs.build.outputs.out .. '/content ' .. inputs.target)
+  create = function(inputs, ctx)
+    ctx:exec({ bin = 'ln', args = { '-sf', inputs.build.outputs.out .. '/content', inputs.target } })
   end,
-  destroy = function(inputs, ctx)
-    ctx:exec('rm ' .. inputs.target)
+  destroy = function(outputs, ctx)
+    ctx:exec({ bin = 'rm', args = { outputs.target } })
   end,
 })
 ```
@@ -403,28 +418,26 @@ sys.bind({
 ### Env Builds
 
 ```lua
+local modules = require('syslua.modules')
+
 -- User writes:
-lib.env.setup({ EDITOR = 'nvim', PAGER = 'less' })
+modules.env.setup({ EDITOR = 'nvim', PAGER = 'less' })
 
 -- Internally becomes:
 local env_build = sys.build({
-  name = 'env-editor-pager',
+  id = 'env-editor-pager',
   inputs = { vars = { EDITOR = 'nvim', PAGER = 'less' } },
-  apply = function(inputs, ctx)
+  create = function(inputs, ctx)
     -- Generate shell-specific fragments
-    ctx:exec({
-      cmd = 'echo \'export EDITOR="nvim"\nexport PAGER="less"\' > ' .. ctx.out .. '/env.sh'
-    })
-    ctx:exec({
-      cmd = 'echo \'set -gx EDITOR "nvim"\nset -gx PAGER "less"\' > ' .. ctx.out .. '/env.fish'
-    })
+    ctx:write_file(ctx.out .. '/env.sh', 'export EDITOR="nvim"\nexport PAGER="less"')
+    ctx:write_file(ctx.out .. '/env.fish', 'set -gx EDITOR "nvim"\nset -gx PAGER "less"')
     return { out = ctx.out }
   end,
 })
 
 sys.bind({
   inputs = { build = env_build },
-  apply = function(inputs, ctx)
+  create = function(inputs, ctx)
     -- Shell integration handles sourcing these files
   end,
 })

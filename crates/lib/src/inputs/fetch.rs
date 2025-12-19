@@ -281,14 +281,12 @@ pub fn resolve_path(path_str: &str, config_dir: &Path) -> Result<PathBuf, FetchE
 #[cfg(test)]
 mod tests {
   use super::*;
-  use serial_test::serial;
   use tempfile::TempDir;
 
   mod resolve_path_tests {
     use super::*;
 
     #[test]
-    #[serial]
     #[cfg(unix)]
     fn tilde_expansion() {
       let temp_dir = TempDir::new().unwrap();
@@ -305,7 +303,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     #[cfg(unix)]
     fn bare_tilde() {
       let temp_dir = TempDir::new().unwrap();

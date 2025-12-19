@@ -63,7 +63,6 @@ mod tests {
   }
 
   #[test]
-  #[serial]
   #[cfg(not(windows))]
   fn default_system_store_at_root() {
     let path = StorePaths::default_system_store_path();
