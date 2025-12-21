@@ -41,3 +41,4 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security",
   "Win32_System_Threading",
 ] }
+junction = "1.3"

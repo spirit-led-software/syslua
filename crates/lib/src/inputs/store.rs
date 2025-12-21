@@ -216,10 +216,13 @@ impl InputStore {
 
       // Skip if link already exists and points to the right place
       if link_path.exists() || link_path.symlink_metadata().is_ok() {
-        if let Ok(target) = fs::read_link(&link_path) {
+        // Use read_dir_link which handles both symlinks and junctions
+        if let Some(target) = read_dir_link(&link_path) {
           // Normalize both paths for comparison
           let expected = compute_relative_link(input_path, dep_store_path);
-          if target == expected {
+          // For junctions, the target is absolute, so also compare against the absolute path
+          let expected_abs = inputs_dir.join(&expected);
+          if target == expected || target == expected_abs {
             trace!(dep = dep_name, "dependency link already exists");
             continue;
           }
@@ -269,24 +272,23 @@ impl InputStore {
       let name = entry.file_name().to_string_lossy().to_string();
       let link_path = entry.path();
 
-      // Read the symlink target and resolve to absolute path
+      // Read the symlink/junction target and resolve to absolute path
       if link_path.symlink_metadata().is_ok() {
-        let target = fs::read_link(&link_path).map_err(|e| StoreError::ReadSymlink {
-          path: link_path.clone(),
-          source: e,
-        })?;
+        // Use read_dir_link which handles both symlinks and junctions
+        if let Some(target) = read_dir_link(&link_path) {
+          // Resolve relative symlink to absolute path
+          let resolved = if target.is_relative() {
+            inputs_dir
+              .join(&target)
+              .canonicalize()
+              .unwrap_or(inputs_dir.join(&target))
+          } else {
+            // For junctions, target is already absolute
+            target.canonicalize().unwrap_or(target)
+          };
 
-        // Resolve relative symlink to absolute path
-        let resolved = if target.is_relative() {
-          inputs_dir
-            .join(&target)
-            .canonicalize()
-            .unwrap_or(inputs_dir.join(&target))
-        } else {
-          target
-        };
-
-        deps.insert(name, resolved);
+          deps.insert(name, resolved);
+        }
       }
     }
 
@@ -357,13 +359,9 @@ fn create_dir_link(target: &Path, link: &Path) -> Result<(), StoreError> {
 #[cfg(windows)]
 fn create_dir_link(target: &Path, link: &Path) -> Result<(), StoreError> {
   // First try symlink (may require elevated permissions)
-  if let Ok(()) = std::os::windows::fs::symlink_dir(target, link) {
+  if std::os::windows::fs::symlink_dir(target, link).is_ok() {
     return Ok(());
   }
-
-  // Try junction (works without admin on Windows 7+)
-  // Note: junction crate would be used here, but we'll use symlink_dir for now
-  // and fall back to copy
 
   // For relative targets, we need to resolve to absolute for junction/copy
   let absolute_target = if target.is_relative() {
@@ -376,9 +374,14 @@ fn create_dir_link(target: &Path, link: &Path) -> Result<(), StoreError> {
     target.to_path_buf()
   };
 
+  // Try junction (works without admin on Windows 7+)
+  if junction::create(&absolute_target, link).is_ok() {
+    return Ok(());
+  }
+
   // Last resort: copy the directory
   copy_dir_all(&absolute_target, link).map_err(|e| StoreError::CopyDir {
-    from: absolute_target,
+    from: absolute_target.clone(),
     to: link.to_path_buf(),
     source: e,
   })?;
@@ -386,10 +389,34 @@ fn create_dir_link(target: &Path, link: &Path) -> Result<(), StoreError> {
   warn!(
     target = %target.display(),
     link = %link.display(),
-    "fell back to copying directory (symlinks not available)"
+    "fell back to copying directory (symlinks and junctions not available)"
   );
 
   Ok(())
+}
+
+/// Read the target of a directory link (symlink or junction) on Windows.
+///
+/// Returns `None` if the path is not a symlink or junction.
+#[cfg(windows)]
+fn read_dir_link(link: &Path) -> Option<PathBuf> {
+  // First try reading as a standard symlink
+  if let Ok(target) = fs::read_link(link) {
+    return Some(target);
+  }
+
+  // Try reading as a junction
+  if let Ok(target) = junction::get_target(link) {
+    return Some(target);
+  }
+
+  None
+}
+
+/// Read the target of a directory link (symlink) on Unix.
+#[cfg(unix)]
+fn read_dir_link(link: &Path) -> Option<PathBuf> {
+  fs::read_link(link).ok()
 }
 
 /// Copy a directory recursively.

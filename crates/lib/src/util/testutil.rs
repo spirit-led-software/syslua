@@ -60,3 +60,26 @@ pub fn echo_msg(msg: &str) -> (&'static str, Vec<String>) {
 pub fn echo_msg(msg: &str) -> (&'static str, Vec<String>) {
   ("cmd.exe", vec!["/C".to_string(), format!("echo {}", msg)])
 }
+
+/// Convert a path to a Lua-safe URL string.
+///
+/// On Windows, paths contain backslashes which become escape sequences in Lua strings.
+/// This function converts backslashes to forward slashes for use in Lua code.
+///
+/// # Example
+///
+/// ```
+/// use syslua_lib::util::testutil::path_to_lua_url;
+/// use std::path::Path;
+///
+/// let path = Path::new("/tmp/my-lib");
+/// let url = path_to_lua_url(path);
+/// assert_eq!(url, "path:/tmp/my-lib");
+/// ```
+pub fn path_to_lua_url(path: &std::path::Path) -> String {
+  // Convert the path to a string with forward slashes for Lua compatibility
+  let path_str = path.to_string_lossy();
+  // Replace backslashes with forward slashes (Windows paths)
+  let normalized = path_str.replace('\\', "/");
+  format!("path:{}", normalized)
+}

@@ -369,6 +369,7 @@ mod tests {
     use serial_test::serial;
 
     use super::*;
+    use crate::util::testutil::path_to_lua_url;
 
     #[test]
     #[serial]
@@ -517,12 +518,12 @@ return {
           r#"
 return {{
   inputs = {{
-    lib_b = "path:{}",
+    lib_b = "{}",
   }},
   setup = function() end,
 }}
 "#,
-          lib_b.display()
+          path_to_lua_url(&lib_b)
         ),
       )
       .unwrap();
@@ -535,12 +536,12 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_a = "path:{}",
+    lib_a = "{}",
   }},
   setup = function(inputs) end,
 }}
 "#,
-          lib_a.display()
+          path_to_lua_url(&lib_a)
         ),
       )
       .unwrap();
@@ -613,14 +614,14 @@ return {
           r#"
 return {{
   inputs = {{
-    input_a = "path:{}",
-    input_b = "path:{}",
+    input_a = "{}",
+    input_b = "{}",
   }},
   setup = function(inputs) end,
 }}
 "#,
-          input_a.display(),
-          input_b.display()
+          path_to_lua_url(&input_a),
+          path_to_lua_url(&input_b)
         ),
       )
       .unwrap();

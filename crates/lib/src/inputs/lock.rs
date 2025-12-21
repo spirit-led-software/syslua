@@ -7,7 +7,7 @@
 //!
 //! ```json
 //! {
-//!   "version": 2,
+//!   "version": 1,
 //!   "root": "root",
 //!   "nodes": {
 //!     "root": {
@@ -48,7 +48,7 @@ use super::store::InputStore;
 use super::types::LockNode;
 
 /// Current lock file format version.
-pub const LOCK_VERSION: u32 = 2;
+pub const LOCK_VERSION: u32 = 1;
 
 /// Lock file name.
 pub const LOCK_FILENAME: &str = "syslua.lock";
@@ -94,12 +94,12 @@ impl LockedInput {
 }
 
 // =============================================================================
-// Version 2 (Current) Types
+// Version 1 (Current) Types
 // =============================================================================
 
-/// A V2 lock file with graph-based transitive dependencies.
+/// A V1 lock file with graph-based transitive dependencies.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LockFileV2 {
+pub struct LockFileV1 {
   /// Lock file format version.
   pub version: u32,
   /// Label of the root node (always "root").
@@ -108,14 +108,14 @@ pub struct LockFileV2 {
   pub nodes: BTreeMap<String, LockNode>,
 }
 
-impl Default for LockFileV2 {
+impl Default for LockFileV1 {
   fn default() -> Self {
     Self::new()
   }
 }
 
-impl LockFileV2 {
-  /// Create a new empty V2 lock file.
+impl LockFileV1 {
+  /// Create a new empty lock file.
   pub fn new() -> Self {
     let mut nodes = BTreeMap::new();
     nodes.insert(ROOT_NODE_LABEL.to_string(), LockNode::root(BTreeMap::new()));
@@ -230,10 +230,54 @@ impl LockFileV2 {
     if let Some(root) = self.root_node_mut()
       && root.inputs.remove(name).is_some()
     {
-      // TODO: Clean up orphaned nodes (nodes no longer referenced)
+      self.remove_orphaned_nodes();
       return true;
     }
     false
+  }
+
+  /// Collect all node labels reachable from the root.
+  ///
+  /// Performs a depth-first traversal of the dependency graph starting from
+  /// the root node. Returns a set of all reachable node labels.
+  fn collect_reachable_nodes(&self) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+
+    let mut reachable = HashSet::new();
+    let mut stack = vec![self.root.clone()];
+
+    while let Some(label) = stack.pop() {
+      if reachable.insert(label.clone())
+        && let Some(node) = self.nodes.get(&label)
+      {
+        for dep_label in node.inputs.values() {
+          stack.push(dep_label.clone());
+        }
+      }
+    }
+
+    reachable
+  }
+
+  /// Remove nodes that are no longer reachable from the root.
+  ///
+  /// This cleans up orphaned transitive dependencies that are no longer
+  /// referenced after a root input is removed.
+  ///
+  /// Returns the number of nodes removed.
+  pub fn remove_orphaned_nodes(&mut self) -> usize {
+    let reachable = self.collect_reachable_nodes();
+    let all_labels: Vec<String> = self.nodes.keys().cloned().collect();
+    let mut removed = 0;
+
+    for label in all_labels {
+      if !reachable.contains(&label) {
+        self.nodes.remove(&label);
+        removed += 1;
+      }
+    }
+
+    removed
   }
 }
 
@@ -241,13 +285,13 @@ impl LockFileV2 {
 // Unified Lock File (handles both versions)
 // =============================================================================
 
-/// A lock file that can be either V1 or V2.
+/// A lock file that can be any version.
 ///
-/// This is the main type used by the resolution system. It reads both V1 and V2
-/// formats, but always writes V2 format.
+/// This is the main type used by the resolution system. It reads all formats, but only
+/// writes the latest version.
 #[derive(Debug, Clone, PartialEq)]
 pub struct LockFile {
-  inner: LockFileV2,
+  inner: LockFileV1,
 }
 
 impl Default for LockFile {
@@ -257,25 +301,25 @@ impl Default for LockFile {
 }
 
 impl LockFile {
-  /// Create a new empty lock file (V2).
+  /// Create a new empty lock file.
   pub fn new() -> Self {
     Self {
-      inner: LockFileV2::new(),
+      inner: LockFileV1::new(),
     }
   }
 
-  /// Create a lock file from a V2 structure.
-  pub fn from_v2(v2: LockFileV2) -> Self {
-    Self { inner: v2 }
+  /// Create a lock file from a V1 structure.
+  pub fn from_v1(v1: LockFileV1) -> Self {
+    Self { inner: v1 }
   }
 
-  /// Get a reference to the underlying V2 structure.
-  pub fn as_v2(&self) -> &LockFileV2 {
+  /// Get a reference to the underlying V1 structure.
+  pub fn as_v1(&self) -> &LockFileV1 {
     &self.inner
   }
 
-  /// Get a mutable reference to the underlying V2 structure.
-  pub fn as_v2_mut(&mut self) -> &mut LockFileV2 {
+  /// Get a mutable reference to the underlying V1 structure.
+  pub fn as_v1_mut(&mut self) -> &mut LockFileV1 {
     &mut self.inner
   }
 
@@ -300,13 +344,13 @@ impl LockFile {
       return Err(LockError::UnsupportedVersion(version));
     }
 
-    let v2: LockFileV2 = serde_json::from_value(value).map_err(LockError::Parse)?;
-    Ok(Some(Self::from_v2(v2)))
+    let v1: LockFileV1 = serde_json::from_value(value).map_err(LockError::Parse)?;
+    Ok(Some(Self::from_v1(v1)))
   }
 
   /// Save the lock file to the given path.
   ///
-  /// Always writes V2 format.
+  /// Always writes latest format.
   pub fn save(&self, path: &Path) -> Result<(), LockError> {
     let content = serde_json::to_string_pretty(&self.inner).map_err(LockError::Serialize)?;
     fs::write(path, content).map_err(LockError::Write)?;
@@ -337,7 +381,7 @@ impl LockFile {
 
   /// Insert or update a locked input (V1 compatibility).
   ///
-  /// This adds/updates a root input in V2 format.
+  /// This adds/updates a root input in the lock file.
   pub fn insert(&mut self, name: String, input: LockedInput) {
     self
       .inner
@@ -351,7 +395,7 @@ impl LockFile {
 
   /// Access the inputs map for backwards compatibility.
   ///
-  /// Note: This recreates a flat view from the V2 graph structure.
+  /// Note: This recreates a flat view from the graph structure.
   pub fn inputs(&self) -> BTreeMap<String, LockedInput> {
     let mut map = BTreeMap::new();
     for name in self.inner.root_input_names() {
@@ -416,12 +460,12 @@ mod tests {
     }
   }
 
-  mod lock_file_v2 {
+  mod lock_file_v1 {
     use super::*;
 
     #[test]
     fn new_creates_root_node() {
-      let lock = LockFileV2::new();
+      let lock = LockFileV1::new();
       assert_eq!(lock.version, LOCK_VERSION);
       assert_eq!(lock.root, ROOT_NODE_LABEL);
       assert!(lock.root_node().is_some());
@@ -430,7 +474,7 @@ mod tests {
 
     #[test]
     fn add_root_input() {
-      let mut lock = LockFileV2::new();
+      let mut lock = LockFileV1::new();
       lock.add_root_input("pkgs", "git:https://example.com/pkgs", "abc123", "git", Some(12345));
 
       assert!(lock.get_root_input("pkgs").is_some());
@@ -441,7 +485,7 @@ mod tests {
 
     #[test]
     fn add_transitive_input() {
-      let mut lock = LockFileV2::new();
+      let mut lock = LockFileV1::new();
       lock.add_root_input("pkgs", "git:https://example.com/pkgs", "abc123", "git", None);
 
       let pkgs_label = lock.get_root_input_label("pkgs").unwrap().to_string();
@@ -464,7 +508,7 @@ mod tests {
 
     #[test]
     fn root_input_names() {
-      let mut lock = LockFileV2::new();
+      let mut lock = LockFileV1::new();
       lock.add_root_input("pkgs", "git:a", "abc", "git", None);
       lock.add_root_input("utils", "git:b", "def", "git", None);
 
@@ -476,12 +520,157 @@ mod tests {
 
     #[test]
     fn remove_root_input() {
-      let mut lock = LockFileV2::new();
+      let mut lock = LockFileV1::new();
       lock.add_root_input("pkgs", "git:a", "abc", "git", None);
 
       assert!(lock.remove_root_input("pkgs"));
       assert!(lock.get_root_input("pkgs").is_none());
       assert!(!lock.remove_root_input("pkgs")); // Already removed
+    }
+
+    #[test]
+    fn remove_root_input_cleans_up_orphaned_transitive_deps() {
+      let mut lock = LockFileV1::new();
+
+      // Add pkgs which depends on utils
+      lock.add_root_input("pkgs", "git:https://example.com/pkgs", "abc123", "git", None);
+      let pkgs_label = lock.get_root_input_label("pkgs").unwrap().to_string();
+      lock.add_transitive_input(
+        &pkgs_label,
+        "utils",
+        "git:https://example.com/utils",
+        "def456",
+        "git",
+        None,
+      );
+
+      // Verify utils node exists
+      let utils_label = lock.get_node(&pkgs_label).unwrap().inputs.get("utils").unwrap().clone();
+      assert!(lock.get_node(&utils_label).is_some());
+
+      // Remove pkgs - should also remove orphaned utils
+      assert!(lock.remove_root_input("pkgs"));
+
+      // pkgs node should be gone
+      assert!(lock.get_node(&pkgs_label).is_none());
+      // utils node should also be gone (orphaned)
+      assert!(lock.get_node(&utils_label).is_none());
+      // Only root should remain
+      assert_eq!(lock.nodes.len(), 1);
+      assert!(lock.nodes.contains_key(ROOT_NODE_LABEL));
+    }
+
+    #[test]
+    fn remove_root_input_preserves_shared_deps() {
+      let mut lock = LockFileV1::new();
+
+      // Add pkgs_a which depends on utils
+      lock.add_root_input("pkgs_a", "git:https://example.com/pkgs_a", "aaa", "git", None);
+      let pkgs_a_label = lock.get_root_input_label("pkgs_a").unwrap().to_string();
+      lock.add_transitive_input(
+        &pkgs_a_label,
+        "utils",
+        "git:https://example.com/utils",
+        "def456",
+        "git",
+        None,
+      );
+
+      // Add pkgs_b which also depends on the same utils
+      lock.add_root_input("pkgs_b", "git:https://example.com/pkgs_b", "bbb", "git", None);
+      let pkgs_b_label = lock.get_root_input_label("pkgs_b").unwrap().to_string();
+      lock.add_transitive_input(
+        &pkgs_b_label,
+        "utils",
+        "git:https://example.com/utils",
+        "def456",
+        "git",
+        None,
+      );
+
+      // Get the shared utils label
+      let utils_label = lock
+        .get_node(&pkgs_a_label)
+        .unwrap()
+        .inputs
+        .get("utils")
+        .unwrap()
+        .clone();
+
+      // Remove pkgs_a
+      assert!(lock.remove_root_input("pkgs_a"));
+
+      // pkgs_a should be gone
+      assert!(lock.get_node(&pkgs_a_label).is_none());
+      // utils should still exist (still referenced by pkgs_b)
+      assert!(lock.get_node(&utils_label).is_some());
+      // pkgs_b should still exist
+      assert!(lock.get_root_input("pkgs_b").is_some());
+    }
+
+    #[test]
+    fn remove_orphaned_nodes_handles_deep_chains() {
+      let mut lock = LockFileV1::new();
+
+      // Create a chain: root -> pkgs -> lib_a -> lib_b -> lib_c
+      lock.add_root_input("pkgs", "git:https://example.com/pkgs", "abc", "git", None);
+      let pkgs_label = lock.get_root_input_label("pkgs").unwrap().to_string();
+
+      lock.add_transitive_input(
+        &pkgs_label,
+        "lib_a",
+        "git:https://example.com/lib_a",
+        "aaa",
+        "git",
+        None,
+      );
+      let lib_a_label = lock.get_node(&pkgs_label).unwrap().inputs.get("lib_a").unwrap().clone();
+
+      lock.add_transitive_input(
+        &lib_a_label,
+        "lib_b",
+        "git:https://example.com/lib_b",
+        "bbb",
+        "git",
+        None,
+      );
+      let lib_b_label = lock
+        .get_node(&lib_a_label)
+        .unwrap()
+        .inputs
+        .get("lib_b")
+        .unwrap()
+        .clone();
+
+      lock.add_transitive_input(
+        &lib_b_label,
+        "lib_c",
+        "git:https://example.com/lib_c",
+        "ccc",
+        "git",
+        None,
+      );
+      let lib_c_label = lock
+        .get_node(&lib_b_label)
+        .unwrap()
+        .inputs
+        .get("lib_c")
+        .unwrap()
+        .clone();
+
+      // Verify all nodes exist (root + pkgs + lib_a + lib_b + lib_c = 5)
+      assert_eq!(lock.nodes.len(), 5);
+
+      // Remove pkgs - entire chain should be cleaned up
+      assert!(lock.remove_root_input("pkgs"));
+
+      // Only root should remain
+      assert_eq!(lock.nodes.len(), 1);
+      assert!(lock.nodes.contains_key(ROOT_NODE_LABEL));
+      assert!(lock.get_node(&pkgs_label).is_none());
+      assert!(lock.get_node(&lib_a_label).is_none());
+      assert!(lock.get_node(&lib_b_label).is_none());
+      assert!(lock.get_node(&lib_c_label).is_none());
     }
   }
 
@@ -565,8 +754,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn v2_json_format() {
-      let mut lock = LockFileV2::new();
+    fn v1_json_format() {
+      let mut lock = LockFileV1::new();
       lock.add_root_input(
         "pkgs",
         "git:https://example.com/pkgs",
@@ -577,7 +766,7 @@ mod tests {
 
       let json = serde_json::to_string_pretty(&lock).unwrap();
 
-      assert!(json.contains(r#""version": 2"#));
+      assert!(json.contains(r#""version": 1"#));
       assert!(json.contains(r#""root": "root""#));
       assert!(json.contains(r#""nodes""#));
       assert!(json.contains(r#""type": "git""#));

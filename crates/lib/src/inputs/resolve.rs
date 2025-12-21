@@ -635,6 +635,8 @@ mod tests {
     use super::*;
     use std::fs;
 
+    use crate::util::testutil::path_to_lua_url;
+
     /// Helper to create a minimal Lua input with dependencies
     fn create_input_with_deps(dir: &Path, deps: &[(&str, &str)]) {
       fs::create_dir_all(dir).unwrap();
@@ -691,19 +693,19 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_a = "path:{}",
+    lib_a = "{}",
   }},
   setup = function(inputs) end,
 }}
 "#,
-          lib_a.display()
+          path_to_lua_url(&lib_a)
         ),
       )
       .unwrap();
 
       // Resolve lib_b from the config
       let mut decls = InputDecls::new();
-      decls.insert("lib_b".to_string(), InputDecl::Url(format!("path:{}", lib_b.display())));
+      decls.insert("lib_b".to_string(), InputDecl::Url(path_to_lua_url(&lib_b)));
 
       let result = resolve_inputs(&decls, config_dir, None).unwrap();
 
@@ -733,19 +735,19 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_a = "path:{}",
+    lib_a = "{}",
   }},
   setup = function(inputs) end,
 }}
 "#,
-          lib_a.display()
+          path_to_lua_url(&lib_a)
         ),
       )
       .unwrap();
 
       // Resolve lib_b from the config
       let mut decls = InputDecls::new();
-      decls.insert("lib_b".to_string(), InputDecl::Url(format!("path:{}", lib_b.display())));
+      decls.insert("lib_b".to_string(), InputDecl::Url(path_to_lua_url(&lib_b)));
 
       let result = resolve_inputs(&decls, config_dir, None).unwrap();
 
@@ -777,12 +779,12 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_c = "path:{}",
+    lib_c = "{}",
   }},
   setup = function(inputs) end,
 }}
 "#,
-          lib_c.display()
+          path_to_lua_url(&lib_c)
         ),
       )
       .unwrap();
@@ -796,20 +798,20 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_c = "path:{}",
+    lib_c = "{}",
   }},
   setup = function(inputs) end,
 }}
 "#,
-          lib_c.display()
+          path_to_lua_url(&lib_c)
         ),
       )
       .unwrap();
 
       // Resolve both A and B from the config
       let mut decls = InputDecls::new();
-      decls.insert("lib_a".to_string(), InputDecl::Url(format!("path:{}", lib_a.display())));
-      decls.insert("lib_b".to_string(), InputDecl::Url(format!("path:{}", lib_b.display())));
+      decls.insert("lib_a".to_string(), InputDecl::Url(path_to_lua_url(&lib_a)));
+      decls.insert("lib_b".to_string(), InputDecl::Url(path_to_lua_url(&lib_b)));
 
       let result = resolve_inputs(&decls, config_dir, None).unwrap();
 
@@ -842,7 +844,7 @@ return {{
 
       // Resolve it
       let mut decls = InputDecls::new();
-      decls.insert("lib_a".to_string(), InputDecl::Url(format!("path:{}", lib_a.display())));
+      decls.insert("lib_a".to_string(), InputDecl::Url(path_to_lua_url(&lib_a)));
 
       let result = resolve_inputs(&decls, config_dir, None).unwrap();
 
@@ -894,12 +896,12 @@ return {
           r#"
 return {{
   inputs = {{
-    utils = "path:{}",
+    utils = "{}",
   }},
   setup = function() end,
 }}
 "#,
-          utils_v1.display()
+          path_to_lua_url(&utils_v1)
         ),
       )
       .unwrap();
@@ -913,16 +915,13 @@ return {{
       decls.insert(
         "lib".to_string(),
         InputDecl::Extended {
-          url: Some(format!("path:{}", lib.display())),
+          url: Some(path_to_lua_url(&lib)),
           inputs: overrides,
         },
       );
 
       // Also declare my_utils pointing to v2
-      decls.insert(
-        "my_utils".to_string(),
-        InputDecl::Url(format!("path:{}", utils_v2.display())),
-      );
+      decls.insert("my_utils".to_string(), InputDecl::Url(path_to_lua_url(&utils_v2)));
 
       let result = resolve_inputs(&decls, config_dir, None).unwrap();
 
@@ -958,12 +957,12 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_b = "path:{}",
+    lib_b = "{}",
   }},
   setup = function() end,
 }}
 "#,
-          lib_b.display()
+          path_to_lua_url(&lib_b)
         ),
       )
       .unwrap();
@@ -976,19 +975,19 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_a = "path:{}",
+    lib_a = "{}",
   }},
   setup = function() end,
 }}
 "#,
-          lib_a.display()
+          path_to_lua_url(&lib_a)
         ),
       )
       .unwrap();
 
       // Resolve lib_a
       let mut decls = InputDecls::new();
-      decls.insert("lib_a".to_string(), InputDecl::Url(format!("path:{}", lib_a.display())));
+      decls.insert("lib_a".to_string(), InputDecl::Url(path_to_lua_url(&lib_a)));
 
       // Circular deps should be handled gracefully - resolution should succeed
       let result = resolve_inputs(&decls, config_dir, None);
@@ -1031,12 +1030,12 @@ return {
           r#"
 return {{
   inputs = {{
-    lib_d = "path:{}",
+    lib_d = "{}",
   }},
   setup = function() end,
 }}
 "#,
-          lib_d.display()
+          path_to_lua_url(&lib_d)
         ),
       )
       .unwrap();
@@ -1049,12 +1048,12 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_c = "path:{}",
+    lib_c = "{}",
   }},
   setup = function() end,
 }}
 "#,
-          lib_c.display()
+          path_to_lua_url(&lib_c)
         ),
       )
       .unwrap();
@@ -1067,19 +1066,19 @@ return {{
           r#"
 return {{
   inputs = {{
-    lib_b = "path:{}",
+    lib_b = "{}",
   }},
   setup = function() end,
 }}
 "#,
-          lib_b.display()
+          path_to_lua_url(&lib_b)
         ),
       )
       .unwrap();
 
       // Resolve lib_a
       let mut decls = InputDecls::new();
-      decls.insert("lib_a".to_string(), InputDecl::Url(format!("path:{}", lib_a.display())));
+      decls.insert("lib_a".to_string(), InputDecl::Url(path_to_lua_url(&lib_a)));
 
       let result = resolve_inputs(&decls, config_dir, None).unwrap();
 
