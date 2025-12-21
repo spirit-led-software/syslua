@@ -252,9 +252,12 @@ pub fn resolve_path(path_str: &str, config_dir: &Path) -> Result<PathBuf, FetchE
   let expanded = if let Some(rest) = path_str.strip_prefix("~/") {
     // Tilde expansion
     home_dir().join(rest)
+  } else if let Some(rest) = path_str.strip_prefix("~\\") {
+    // Tilde expansion on Windows
+    home_dir().join(rest)
   } else if path_str == "~" {
     home_dir()
-  } else if path_str.starts_with('/') {
+  } else if Path::is_absolute(&PathBuf::from(path_str)) {
     // Already absolute
     PathBuf::from(path_str)
   } else {
