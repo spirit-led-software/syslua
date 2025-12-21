@@ -335,7 +335,8 @@ fn compute_relative_link(input_path: &Path, to_dir: &Path) -> PathBuf {
   {
     // Same parent directory (the store), use relative path
     // From input_path/.inputs/ go up twice then into sibling
-    return PathBuf::from("../..").join(to_name);
+    // Use Path::new("..").join("..") to get platform-correct separators
+    return Path::new("..").join("..").join(to_name);
   }
 
   // Fallback to absolute path if relative path can't be computed
@@ -358,25 +359,15 @@ fn create_dir_link(target: &Path, link: &Path) -> Result<(), StoreError> {
 /// then falls back to copying.
 #[cfg(windows)]
 fn create_dir_link(target: &Path, link: &Path) -> Result<(), StoreError> {
-  eprintln!("[DEBUG] create_dir_link called");
-  eprintln!("[DEBUG]   target: {}", target.display());
-  eprintln!("[DEBUG]   link: {}", link.display());
-
   // First try symlink (may require elevated permissions)
-  let symlink_result = std::os::windows::fs::symlink_dir(target, link);
-  eprintln!("[DEBUG]   symlink_dir result: {:?}", symlink_result);
-  if symlink_result.is_ok() {
-    eprintln!("[DEBUG]   symlink succeeded, returning");
+  if std::os::windows::fs::symlink_dir(target, link).is_ok() {
     return Ok(());
   }
 
   // For relative targets, we need to resolve to absolute for junction/copy
   let absolute_target = if target.is_relative() {
     if let Some(link_parent) = link.parent() {
-      let joined = link_parent.join(target);
-      eprintln!("[DEBUG]   relative target, link_parent: {}", link_parent.display());
-      eprintln!("[DEBUG]   joined path: {}", joined.display());
-      joined
+      link_parent.join(target)
     } else {
       target.to_path_buf()
     }
@@ -384,37 +375,25 @@ fn create_dir_link(target: &Path, link: &Path) -> Result<(), StoreError> {
     target.to_path_buf()
   };
 
-  eprintln!("[DEBUG]   absolute_target (before canonicalize): {}", absolute_target.display());
-  eprintln!("[DEBUG]   absolute_target exists: {}", absolute_target.exists());
-
   // Canonicalize to resolve ".." components (required for junctions)
-  let canonical_result = absolute_target.canonicalize();
-  eprintln!("[DEBUG]   canonicalize result: {:?}", canonical_result);
-  let absolute_target = canonical_result.map_err(|e| StoreError::CreateSymlink {
+  let absolute_target = absolute_target.canonicalize().map_err(|e| StoreError::CreateSymlink {
     from: target.to_path_buf(),
     to: link.to_path_buf(),
     source: e,
   })?;
 
-  eprintln!("[DEBUG]   absolute_target (after canonicalize): {}", absolute_target.display());
-
   // Try junction (works without admin on Windows 7+)
-  let junction_result = junction::create(&absolute_target, link);
-  eprintln!("[DEBUG]   junction::create result: {:?}", junction_result);
-  if junction_result.is_ok() {
-    eprintln!("[DEBUG]   junction succeeded, returning");
+  if junction::create(&absolute_target, link).is_ok() {
     return Ok(());
   }
 
   // Last resort: copy the directory
-  eprintln!("[DEBUG]   trying copy_dir_all");
   copy_dir_all(&absolute_target, link).map_err(|e| StoreError::CopyDir {
     from: absolute_target.clone(),
     to: link.to_path_buf(),
     source: e,
   })?;
 
-  eprintln!("[DEBUG]   copy succeeded");
   warn!(
     target = %target.display(),
     link = %link.display(),
@@ -770,7 +749,8 @@ mod tests {
       let relative = compute_relative_link(&from, &to);
 
       // From pkgs-abc123/.inputs/ go up twice (out of .inputs, out of pkgs) then into sibling
-      assert_eq!(relative, PathBuf::from("../../utils-def456"));
+      // Use Path::new("..").join("..") to get platform-correct expected value
+      assert_eq!(relative, Path::new("..").join("..").join("utils-def456"));
     }
   }
 }
