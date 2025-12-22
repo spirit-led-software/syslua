@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-  action::Action,
+  action::{Action, ActionCtx, actions::exec::ExecOpts},
   util::hash::{Hashable, ObjectHash},
 };
 
@@ -127,6 +127,36 @@ pub struct BindDef {
 }
 
 impl Hashable for BindDef {}
+
+/// Context for bind `create`, `update`, and `destroy` functions.
+///
+/// Provides `exec` and `out` for recording bind actions.
+/// Note: `fetch_url` is intentionally not available in binds - binds should
+/// only modify system state using build outputs, not download new content.
+#[derive(Default)]
+pub struct BindCtx(ActionCtx);
+
+impl BindCtx {
+  /// Create a new empty bind context.
+  pub fn new() -> Self {
+    Self(ActionCtx::new())
+  }
+
+  /// Returns a placeholder string that resolves to the bind's output directory.
+  pub fn out(&self) -> &'static str {
+    self.0.out()
+  }
+
+  /// Record a command execution action and return a placeholder for its output.
+  pub fn exec(&mut self, opts: impl Into<ExecOpts>) -> String {
+    self.0.exec(opts)
+  }
+
+  /// Consume the context and return the recorded actions.
+  pub fn into_actions(self) -> Vec<Action> {
+    self.0.into_actions()
+  }
+}
 
 #[cfg(test)]
 mod tests {

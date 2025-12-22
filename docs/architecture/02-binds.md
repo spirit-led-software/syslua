@@ -39,20 +39,20 @@ Binds follow the same `inputs`/`create` pattern as builds, with required `destro
 
 ```lua
 sys.bind({
-  id = "my-bind",                        -- Optional (required if using update)
+  id = 'my-bind', -- Optional (required if using update)
   inputs = function()
-    return { ... }                       -- Any data needed by create/update/destroy
+    return { ... } -- Any data needed by create/update/destroy
   end,
-  create = function(inputs, ctx)         -- Required: initial creation
+  create = function(inputs, ctx) -- Required: initial creation
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", inputs.source, inputs.target },
+      bin = '/bin/ln',
+      args = { '-sf', inputs.source, inputs.target },
     })
-    return { path = inputs.target }      -- Optional: outputs for destroy/update
+    return { path = inputs.target } -- Optional: outputs for destroy/update
   end,
-  destroy = function(outputs, ctx)       -- Required: cleanup
+  destroy = function(outputs, ctx) -- Required: cleanup
     ctx:exec({
-      bin = "/bin/rm",
+      bin = '/bin/rm',
       args = { outputs.path },
     })
   end,
@@ -69,9 +69,6 @@ The bind context provides actions for executing system modifications. Each actio
 -- Execute a command, returns an opaque reference to stdout
 ---@field exec fun(opts: ExecOpts | string, args?: string[]): string
 
--- Write content to a file, returns an opaque reference to the path
----@field write_file fun(path: string, content: string): string
-
 -- The output directory (placeholder)
 ---@field out string
 ```
@@ -82,31 +79,31 @@ The `exec` action is the primary mechanism for executing operations during a bin
 
 ```lua
 -- Simple command (string)
-ctx:exec("ln -s /src /dest")
+ctx:exec('ln -s /src /dest')
 
 -- Command with binary and args (recommended)
 ctx:exec({
-    bin = "/bin/ln",
-    args = { "-sf", "/src", "/dest" },
+  bin = '/bin/ln',
+  args = { '-sf', '/src', '/dest' },
 })
 
 -- Command with environment and working directory
 ctx:exec({
-    bin = "/usr/bin/npm",
-    args = { "install", "-g", "some-package" },
-    env = { HOME = os.getenv("HOME") },
-    cwd = "/some/path",
+  bin = '/usr/bin/npm',
+  args = { 'install', '-g', 'some-package' },
+  env = { HOME = os.getenv('HOME') },
+  cwd = '/some/path',
 })
 ```
 
 **ExecOpts:**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `bin` | string | Required: path to the binary to execute |
-| `args` | string[]? | Optional: arguments to pass |
-| `cwd` | string? | Optional: working directory for the command |
-| `env` | table<string,string>? | Optional: environment variables for the command |
+| Field  | Type                  | Description                                     |
+| ------ | --------------------- | ----------------------------------------------- |
+| `bin`  | string                | Required: path to the binary to execute         |
+| `args` | string[]?             | Optional: arguments to pass                     |
+| `cwd`  | string?               | Optional: working directory for the command     |
+| `env`  | table<string,string>? | Optional: environment variables for the command |
 
 **Why `create`/`destroy` instead of `undo_cmd`?**
 
@@ -127,20 +124,14 @@ The bind system uses a two-tier type architecture:
 pub struct ObjectHash(pub String);
 
 /// Actions that can be performed during a bind
+/// Note: Unlike builds, binds do not support FetchUrl - they should only
+/// use outputs from builds rather than fetching content directly.
 pub enum Action {
     Exec {
         bin: String,
         args: Option<Vec<String>>,
         env: Option<BTreeMap<String, String>>,
         cwd: Option<String>,
-    },
-    WriteFile {
-        path: String,
-        content: String,
-    },
-    FetchUrl {
-        url: String,
-        sha256: String,
     },
 }
 
@@ -202,42 +193,42 @@ If any condition is not met, the system falls back to destroy+create.
 
 ```lua
 sys.bind({
-  id = "my-service-link",  -- REQUIRED when using update
+  id = 'my-service-link', -- REQUIRED when using update
   inputs = function()
-    return { version = "2.0" }
+    return { version = '2.0' }
   end,
   create = function(inputs, ctx)
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", "/apps/" .. inputs.version, "/current" },
+      bin = '/bin/ln',
+      args = { '-sf', '/apps/' .. inputs.version, '/current' },
     })
-    return { link = "/current" }
+    return { link = '/current' }
   end,
   update = function(outputs, inputs, ctx)
     -- outputs: the outputs from the PREVIOUS create (or update)
     -- inputs: the NEW inputs
     -- ctx: action context
-    ctx:exec({ bin = "/bin/rm", args = { outputs.link } })
+    ctx:exec({ bin = '/bin/rm', args = { outputs.link } })
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", "/apps/" .. inputs.version, "/current" },
+      bin = '/bin/ln',
+      args = { '-sf', '/apps/' .. inputs.version, '/current' },
     })
-    return { link = "/current" }  -- MUST return same keys as create
+    return { link = '/current' } -- MUST return same keys as create
   end,
   destroy = function(outputs, ctx)
-    ctx:exec({ bin = "/bin/rm", args = { outputs.link } })
+    ctx:exec({ bin = '/bin/rm', args = { outputs.link } })
   end,
 })
 ```
 
 ### Update Requirements
 
-| Requirement | Description |
-|-------------|-------------|
-| `id` required | The bind must have an `id` field to enable update tracking |
-| Same output keys | `update` must return the same output keys as `create` |
-| Outputs parameter | First parameter is outputs from previous create/update |
-| Inputs parameter | Second parameter is the new inputs |
+| Requirement       | Description                                                |
+| ----------------- | ---------------------------------------------------------- |
+| `id` required     | The bind must have an `id` field to enable update tracking |
+| Same output keys  | `update` must return the same output keys as `create`      |
+| Outputs parameter | First parameter is outputs from previous create/update     |
+| Inputs parameter  | Second parameter is the new inputs                         |
 
 ### Update Limitations
 
@@ -246,6 +237,7 @@ sys.bind({
 **State Tracking:** The old bind state is only removed after a successful update. If update fails, the old state file remains, but the actual system state may be corrupted.
 
 **Recommendation:** Only use `update` when:
+
 - The destroy+create cycle would cause significant disruption (e.g., service downtime)
 - The update operation is simple and unlikely to fail partway through
 - You have manual recovery procedures in case of failure
@@ -253,24 +245,26 @@ sys.bind({
 ### Example: When to Use Update
 
 **Good use case - atomic file swap:**
+
 ```lua
 update = function(outputs, inputs, ctx)
   -- Atomic: either succeeds completely or fails before changing anything
   ctx:exec({
-    bin = "/bin/ln",
-    args = { "-sfn", inputs.new_target, outputs.link },
+    bin = '/bin/ln',
+    args = { '-sfn', inputs.new_target, outputs.link },
   })
   return { link = outputs.link }
 end
 ```
 
 **Bad use case - multi-step process:**
+
 ```lua
 update = function(outputs, inputs, ctx)
   -- DANGEROUS: if step 2 fails, step 1 has already modified state
-  ctx:exec({ bin = "stop-service", args = { outputs.service } })  -- Step 1
-  ctx:exec({ bin = "update-config", args = { inputs.config } })   -- Step 2 (might fail!)
-  ctx:exec({ bin = "start-service", args = { outputs.service } }) -- Step 3
+  ctx:exec({ bin = 'stop-service', args = { outputs.service } }) -- Step 1
+  ctx:exec({ bin = 'update-config', args = { inputs.config } }) -- Step 2 (might fail!)
+  ctx:exec({ bin = 'start-service', args = { outputs.service } }) -- Step 3
   return { service = outputs.service }
 end
 ```
@@ -295,29 +289,31 @@ Internally creates:
 local rg_build = sys.build({
   id = 'ripgrep',
   inputs = function()
-    return { url = "...", sha256 = "..." }
+    return { url = '...', sha256 = '...' }
   end,
   create = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.url, inputs.sha256)
     ctx:exec({
-      bin = "/bin/tar",
-      args = { "-xzf", archive, "-C", ctx.out },
+      bin = '/bin/tar',
+      args = { '-xzf', archive, '-C', ctx.out },
     })
     return { out = ctx.out }
   end,
 })
 
 sys.bind({
-  inputs = function() return { build = rg_build } end,
+  inputs = function()
+    return { build = rg_build }
+  end,
   create = function(inputs, ctx)
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", inputs.build.outputs.out .. "/bin/rg", "/usr/local/bin/rg" },
+      bin = '/bin/ln',
+      args = { '-sf', inputs.build.outputs.out .. '/bin/rg', '/usr/local/bin/rg' },
     })
-    return { link = "/usr/local/bin/rg" }
+    return { link = '/usr/local/bin/rg' }
   end,
   destroy = function(outputs, ctx)
-    ctx:exec({ bin = "/bin/rm", args = { outputs.link } })
+    ctx:exec({ bin = '/bin/rm', args = { outputs.link } })
   end,
 })
 ```
@@ -337,27 +333,31 @@ Internally creates:
 -- What happens internally:
 local file_build = sys.build({
   id = 'file-gitconfig',
-  inputs = function() return { source = './dotfiles/gitconfig' } end,
+  inputs = function()
+    return { source = './dotfiles/gitconfig' }
+  end,
   create = function(inputs, ctx)
     ctx:exec({
-      bin = "/bin/cp",
-      args = { inputs.source, ctx.out .. "/content" },
+      bin = '/bin/cp',
+      args = { inputs.source, ctx.out .. '/content' },
     })
     return { out = ctx.out }
   end,
 })
 
 sys.bind({
-  inputs = function() return { build = file_build, target = '~/.gitconfig' } end,
+  inputs = function()
+    return { build = file_build, target = '~/.gitconfig' }
+  end,
   create = function(inputs, ctx)
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", inputs.build.outputs.out .. "/content", inputs.target },
+      bin = '/bin/ln',
+      args = { '-sf', inputs.build.outputs.out .. '/content', inputs.target },
     })
     return { link = inputs.target }
   end,
   destroy = function(outputs, ctx)
-    ctx:exec({ bin = "/bin/rm", args = { outputs.link } })
+    ctx:exec({ bin = '/bin/rm', args = { outputs.link } })
   end,
 })
 ```
@@ -373,13 +373,13 @@ sys.bind({
   end,
   create = function(inputs, ctx)
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", inputs.build.outputs.out .. "/bin/rg", "/usr/local/bin/rg" },
+      bin = '/bin/ln',
+      args = { '-sf', inputs.build.outputs.out .. '/bin/rg', '/usr/local/bin/rg' },
     })
-    return { link = "/usr/local/bin/rg" }
+    return { link = '/usr/local/bin/rg' }
   end,
   destroy = function(outputs, ctx)
-    ctx:exec({ bin = "/bin/rm", args = { outputs.link } })
+    ctx:exec({ bin = '/bin/rm', args = { outputs.link } })
   end,
 })
 ```
@@ -396,13 +396,13 @@ sys.bind({
   end,
   create = function(inputs, ctx)
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", inputs.build.outputs.out .. "/bin/mytool", "/usr/local/bin/mytool" },
+      bin = '/bin/ln',
+      args = { '-sf', inputs.build.outputs.out .. '/bin/mytool', '/usr/local/bin/mytool' },
     })
-    return { link = "/usr/local/bin/mytool" }
+    return { link = '/usr/local/bin/mytool' }
   end,
   destroy = function(outputs, ctx)
-    ctx:exec({ bin = "/bin/rm", args = { outputs.link } })
+    ctx:exec({ bin = '/bin/rm', args = { outputs.link } })
   end,
 })
 
@@ -413,13 +413,17 @@ sys.bind({
   end,
   create = function(inputs, ctx)
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", inputs.build.outputs.out .. "/share/man/man1/mytool.1", sys.path.join(os.getenv("HOME"), ".local/share/man/man1/mytool.1") },
+      bin = '/bin/ln',
+      args = {
+        '-sf',
+        inputs.build.outputs.out .. '/share/man/man1/mytool.1',
+        sys.path.join(os.getenv('HOME'), '.local/share/man/man1/mytool.1'),
+      },
     })
-    return { man_link = sys.path.join(os.getenv("HOME"), ".local/share/man/man1/mytool.1") }
+    return { man_link = sys.path.join(os.getenv('HOME'), '.local/share/man/man1/mytool.1') }
   end,
   destroy = function(outputs, ctx)
-    ctx:exec({ bin = "/bin/rm", args = { outputs.man_link } })
+    ctx:exec({ bin = '/bin/rm', args = { outputs.man_link } })
   end,
 })
 ```
@@ -433,24 +437,28 @@ sys.bind({
   end,
   create = function(inputs, ctx)
     ctx:exec({
-      bin = "/bin/ln",
-      args = { "-sf", inputs.build.outputs.out .. "/bin/nvim", "/usr/local/bin/nvim" },
+      bin = '/bin/ln',
+      args = { '-sf', inputs.build.outputs.out .. '/bin/nvim', '/usr/local/bin/nvim' },
     })
 
     if sys.os == 'darwin' then
       ctx:exec({
-        bin = "/bin/ln",
-        args = { "-sf", inputs.build.outputs.out .. "/Applications/Neovim.app", sys.path.join(os.getenv("HOME"), "Applications/Neovim.app") },
+        bin = '/bin/ln',
+        args = {
+          '-sf',
+          inputs.build.outputs.out .. '/Applications/Neovim.app',
+          sys.path.join(os.getenv('HOME'), 'Applications/Neovim.app'),
+        },
       })
     end
 
-    return { bin_link = "/usr/local/bin/nvim" }
+    return { bin_link = '/usr/local/bin/nvim' }
   end,
   destroy = function(outputs, ctx)
-    ctx:exec({ bin = "/bin/rm", args = { outputs.bin_link } })
+    ctx:exec({ bin = '/bin/rm', args = { outputs.bin_link } })
 
     if sys.os == 'darwin' then
-      ctx:exec({ bin = "/bin/rm", args = { sys.path.join(os.getenv("HOME"), "Applications/Neovim.app") } })
+      ctx:exec({ bin = '/bin/rm', args = { sys.path.join(os.getenv('HOME'), 'Applications/Neovim.app') } })
     end
   end,
 })
@@ -463,20 +471,20 @@ sys.bind({
   create = function(inputs, ctx)
     if sys.os == 'darwin' then
       ctx:exec({
-        bin = "/usr/bin/defaults",
-        args = { "write", "com.apple.finder", "AppleShowAllFiles", "-bool", "true" },
+        bin = '/usr/bin/defaults',
+        args = { 'write', 'com.apple.finder', 'AppleShowAllFiles', '-bool', 'true' },
       })
-      ctx:exec({ bin = "/usr/bin/killall", args = { "Finder" } })
+      ctx:exec({ bin = '/usr/bin/killall', args = { 'Finder' } })
     end
     return {}
   end,
   destroy = function(outputs, ctx)
     if sys.os == 'darwin' then
       ctx:exec({
-        bin = "/usr/bin/defaults",
-        args = { "write", "com.apple.finder", "AppleShowAllFiles", "-bool", "false" },
+        bin = '/usr/bin/defaults',
+        args = { 'write', 'com.apple.finder', 'AppleShowAllFiles', '-bool', 'false' },
       })
-      ctx:exec({ bin = "/usr/bin/killall", args = { "Finder" } })
+      ctx:exec({ bin = '/usr/bin/killall', args = { 'Finder' } })
     end
   end,
 })
@@ -492,40 +500,44 @@ sys.bind({
   create = function(inputs, ctx)
     if sys.os == 'linux' then
       ctx:exec({
-        bin = "/bin/ln",
-        args = { "-sf", inputs.service_build.outputs.out .. "/nginx.service", "/etc/systemd/system/nginx.service" },
+        bin = '/bin/ln',
+        args = { '-sf', inputs.service_build.outputs.out .. '/nginx.service', '/etc/systemd/system/nginx.service' },
       })
       ctx:exec({
-        bin = "/bin/systemctl",
-        args = { "daemon-reload" },
+        bin = '/bin/systemctl',
+        args = { 'daemon-reload' },
       })
       ctx:exec({
-        bin = "/bin/systemctl",
-        args = { "enable", "--now", "nginx" },
+        bin = '/bin/systemctl',
+        args = { 'enable', '--now', 'nginx' },
       })
     elseif sys.os == 'darwin' then
       ctx:exec({
-        bin = "/bin/ln",
-        args = { "-sf", inputs.service_build.outputs.out .. "/nginx.plist", sys.path.join(os.getenv("HOME"), "Library/LaunchAgents/nginx.plist") },
+        bin = '/bin/ln',
+        args = {
+          '-sf',
+          inputs.service_build.outputs.out .. '/nginx.plist',
+          sys.path.join(os.getenv('HOME'), 'Library/LaunchAgents/nginx.plist'),
+        },
       })
       ctx:exec({
-        bin = "/bin/launchctl",
-        args = { "load", sys.path.join(os.getenv("HOME"), "Library/LaunchAgents/nginx.plist") },
+        bin = '/bin/launchctl',
+        args = { 'load', sys.path.join(os.getenv('HOME'), 'Library/LaunchAgents/nginx.plist') },
       })
     end
     return {}
   end,
   destroy = function(outputs, ctx)
     if sys.os == 'linux' then
-      ctx:exec({ bin = "/bin/systemctl", args = { "disable", "--now", "nginx" } })
-      ctx:exec({ bin = "/bin/rm", args = { "/etc/systemd/system/nginx.service" } })
-      ctx:exec({ bin = "/bin/systemctl", args = { "daemon-reload" } })
+      ctx:exec({ bin = '/bin/systemctl', args = { 'disable', '--now', 'nginx' } })
+      ctx:exec({ bin = '/bin/rm', args = { '/etc/systemd/system/nginx.service' } })
+      ctx:exec({ bin = '/bin/systemctl', args = { 'daemon-reload' } })
     elseif sys.os == 'darwin' then
       ctx:exec({
-        bin = "/bin/launchctl",
-        args = { "unload", sys.path.join(os.getenv("HOME"), "Library/LaunchAgents/nginx.plist") },
+        bin = '/bin/launchctl',
+        args = { 'unload', sys.path.join(os.getenv('HOME'), 'Library/LaunchAgents/nginx.plist') },
       })
-      ctx:exec({ bin = "/bin/rm", args = { sys.path.join(os.getenv("HOME"), "Library/LaunchAgents/nginx.plist") } })
+      ctx:exec({ bin = '/bin/rm', args = { sys.path.join(os.getenv('HOME'), 'Library/LaunchAgents/nginx.plist') } })
     end
   end,
 })

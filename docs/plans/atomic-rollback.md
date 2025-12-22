@@ -15,6 +15,7 @@ The current implementation tracks executed nodes but the rollback logic is incom
 ## Current State
 
 In `crates/lib/src/execute/apply.rs`:
+
 - `executed_nodes` vector tracks completed nodes
 - On failure, destroy is called on bind nodes
 - But the full pre-apply state isn't restored
@@ -50,10 +51,10 @@ Apply begins
 
 ## Files to Modify
 
-| Path | Changes |
-|------|---------|
-| `crates/lib/src/execute/apply.rs` | Improve rollback logic |
-| `crates/lib/src/snapshot/mod.rs` | Add restore functionality |
+| Path                              | Changes                   |
+| --------------------------------- | ------------------------- |
+| `crates/lib/src/execute/apply.rs` | Improve rollback logic    |
+| `crates/lib/src/snapshot/mod.rs`  | Add restore functionality |
 
 ## Implementation Details
 

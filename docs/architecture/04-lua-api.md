@@ -83,7 +83,7 @@ local M = {}
 
 function M.setup()
   sys.build({
-    id = "my-tool",
+    id = 'my-tool',
     create = function(inputs, ctx)
       return { out = ctx.out }
     end,
@@ -119,11 +119,11 @@ return M
 
 ### Core Primitives (Rust-backed)
 
-| Function     | Purpose                             | See Also                     |
-| ------------ | ----------------------------------- | ---------------------------- |
-| `sys.build()` | Create a build (build recipe)      | [Builds](./01-builds.md)     |
-| `sys.bind()`  | Create a bind (side effects)       | [Binds](./02-binds.md)       |
-| `input()`    | Declare an input source             | [Inputs](./06-inputs.md)     |
+| Function      | Purpose                       | See Also                 |
+| ------------- | ----------------------------- | ------------------------ |
+| `sys.build()` | Create a build (build recipe) | [Builds](./01-builds.md) |
+| `sys.bind()`  | Create a bind (side effects)  | [Binds](./02-binds.md)   |
+| `input()`     | Declare an input source       | [Inputs](./06-inputs.md) |
 
 ### Custom ActionCtx Methods
 
@@ -131,31 +131,32 @@ return M
 
 ```lua
 -- Register a cross-platform mkdir helper
-sys.register_ctx_method("mkdir", function(ctx, path)
-  if sys.os == "windows" then
-    return ctx:exec({ bin = "cmd.exe", args = { "/c", "mkdir", path } })
+sys.register_ctx_method('mkdir', function(ctx, path)
+  if sys.os == 'windows' then
+    return ctx:exec({ bin = 'cmd.exe', args = { '/c', 'mkdir', path } })
   else
-    return ctx:exec({ bin = "/bin/mkdir", args = { "-p", path } })
+    return ctx:exec({ bin = '/bin/mkdir', args = { '-p', path } })
   end
 end)
 
 -- Now available on any ActionCtx:
 sys.build({
-  id = "my-tool",
+  id = 'my-tool',
   create = function(inputs, ctx)
-    ctx:mkdir(ctx.out .. "/bin")  -- Uses the registered method
+    ctx:mkdir(ctx.out .. '/bin') -- Uses the registered method
     return { out = ctx.out }
   end,
 })
 ```
 
-| Function | Purpose |
-| -------- | ------- |
+| Function                            | Purpose                                 |
+| ----------------------------------- | --------------------------------------- |
 | `sys.register_ctx_method(name, fn)` | Register a custom method on `ActionCtx` |
-| `sys.unregister_ctx_method(name)` | Remove a previously registered method |
+| `sys.unregister_ctx_method(name)`   | Remove a previously registered method   |
 
 **Rules:**
-- Built-in methods (`exec`, `fetch_url`, `write_file`, `out`) cannot be overridden
+
+- Built-in methods (`exec`, `fetch_url`, `out`) cannot be overridden
 - Registered methods receive `(ctx, ...)` when called with `:` syntax
 - Actions called within registered methods are recorded normally
 - Registration is global—methods are available to all subsequent builds/binds
@@ -163,8 +164,8 @@ sys.build({
 
 ### Convenience Helpers (Lua, via `require('syslua.modules')`)
 
-| Function              | Purpose                               |
-| --------------------- | ------------------------------------- |
+| Function                  | Purpose                               |
+| ------------------------- | ------------------------------------- |
 | `modules.file.setup()`    | Declare a managed file                |
 | `modules.env.setup()`     | Declare environment variables         |
 | `modules.user.setup()`    | Declare per-user scoped configuration |
@@ -195,15 +196,15 @@ sys.arch       -- "aarch64", "x86_64", "i386"
 The `sys.path` table provides cross-platform path helpers:
 
 ```lua
-sys.path.resolve(...)        -- Resolve to absolute path
-sys.path.join(...)           -- Join path segments
-sys.path.dirname(path)       -- Get directory name
-sys.path.basename(path)      -- Get file name
-sys.path.extname(path)       -- Get file extension
-sys.path.is_absolute(path)   -- Check if path is absolute
-sys.path.normalize(path)     -- Normalize path (resolve . and ..)
-sys.path.relative(from, to)  -- Get relative path
-sys.path.split(path)         -- Split into components
+sys.path.resolve(...) -- Resolve to absolute path
+sys.path.join(...) -- Join path segments
+sys.path.dirname(path) -- Get directory name
+sys.path.basename(path) -- Get file name
+sys.path.extname(path) -- Get file extension
+sys.path.is_absolute(path) -- Check if path is absolute
+sys.path.normalize(path) -- Normalize path (resolve . and ..)
+sys.path.relative(from, to) -- Get relative path
+sys.path.split(path) -- Split into components
 ```
 
 ## Library Functions
@@ -251,63 +252,6 @@ syslua/
 ├── lua/
 │   └── syslua/
 │       └── globals.d.lua     # All type definitions
-```
-
-### Example Type Definitions
-
-**`globals.d.lua`:**
-
-```lua
----@meta
-
----@class ExecOpts
----@field bin string Path to binary/executable to run
----@field args? string[] Optional: arguments to pass to the binary
----@field env? table<string,string> Optional: environment variables
----@field cwd? string Optional: working directory
-
----@class ActionCtx
----@field out string Returns the store path placeholder
----@field fetch_url fun(self: ActionCtx, url: string, sha256: string): string Fetches a URL and returns store path
----@field write_file fun(self: ActionCtx, path: string, content: string): string Writes content to a file, returns path
----@field exec fun(self: ActionCtx, opts: string | ExecOpts, args?: string[]): string Executes a command, returns stdout
-
----@class BuildRef
----@field id? string Build id
----@field inputs? table All inputs to the build
----@field outputs table All outputs from the build
----@field hash string Content-addressed hash
-
----@class BuildSpec
----@field id? string Optional: build id for debugging/logging
----@field inputs? table|fun(): table Optional: input data
----@field create fun(inputs: table, ctx: ActionCtx): table Required: build logic, returns outputs
-
----@class BindRef
----@field id? string Binding id
----@field inputs? table All inputs to the binding
----@field outputs? table All outputs from the binding
----@field hash string Hash for deduplication
-
----@class BindSpec
----@field id? string Binding id. Required when providing update method
----@field inputs? table|fun(): table Optional: input data
----@field create fun(inputs: table, ctx: ActionCtx): table|nil Required: binding logic, optionally returns outputs
----@field update? fun(outputs: table, inputs: table, ctx: ActionCtx): table|nil Optional: update logic
----@field destroy? fun(outputs: table, ctx: ActionCtx): nil Optional: cleanup logic, receives outputs
-
----@class Sys
----@field platform Platform Active platform
----@field os Os Operating system name
----@field arch Arch System architecture
----@field path PathHelpers File path utilities
----@field build fun(spec: BuildSpec): BuildRef Creates a build within the store
----@field bind fun(spec: BindSpec): BindRef Creates a binding to the active system
----@field register_ctx_method fun(name: string, fn: fun(ctx: ActionCtx, ...: any): any)
----@field unregister_ctx_method fun(name: string)
-
----@type Sys
-sys = {}
 ```
 
 ### Workspace Configuration
@@ -438,12 +382,11 @@ sys.build({
 
 ### ActionCtx Methods
 
-| Method | Description | Returns |
-|--------|-------------|---------|
-| `ctx.out` | Property returning the build's output directory placeholder | string |
-| `ctx:fetch_url(url, sha256)` | Download file with hash verification | opaque path reference |
-| `ctx:write_file(path, contents)` | Write contents to a file | opaque path reference |
-| `ctx:exec(opts)` | Execute a command | opaque stdout reference |
+| Method                       | Description                                                 | Returns                 |
+| ---------------------------- | ----------------------------------------------------------- | ----------------------- |
+| `ctx.out`                    | Property returning the build's output directory placeholder | string                  |
+| `ctx:fetch_url(url, sha256)` | Download file with hash verification                        | opaque path reference   |
+| `ctx:exec(opts)`             | Execute a command                                           | opaque stdout reference |
 
 ## See Also
 

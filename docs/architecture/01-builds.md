@@ -51,22 +51,22 @@ end
 Inputs can include other builds for build dependencies:
 
 ```lua
-local rust = sys.build({ id = "rust", ... })
+local rust = sys.build({ id = 'rust', ... })
 
 sys.build({
-  id = "ripgrep",
+  id = 'ripgrep',
   inputs = function()
     return {
-      src_url = "...",
-      rust = rust,  -- Build reference
+      src_url = '...',
+      rust = rust, -- Build reference
     }
   end,
   create = function(inputs, ctx)
     -- inputs.rust.outputs.out is the realized output path of the rust build
     ctx:exec({
-      bin = "cargo",
-      args = { "build", "--release" },
-      env = { PATH = inputs.rust.outputs.out .. "/bin:" .. os.getenv("PATH") },
+      bin = 'cargo',
+      args = { 'build', '--release' },
+      env = { PATH = inputs.rust.outputs.out .. '/bin:' .. os.getenv('PATH') },
     })
   end,
 })
@@ -89,14 +89,11 @@ The build context provides actions for fetching, file writing, and shell executi
 
 ```lua
 -- Fetch operations (returns opaque reference to downloaded file)
-ctx:fetch_url(url, sha256)  -- Download file, verify hash
-
--- File operations (returns opaque reference to written file)
-ctx:write_file(path, contents)  -- Write contents to file
+ctx:fetch_url(url, sha256) -- Download file, verify hash
 
 -- Shell execution (returns opaque reference to stdout)
-ctx:exec(opts)               -- Execute a command
-                            -- opts: string | { bin, args?, env?, cwd? }
+ctx:exec(opts) -- Execute a command
+-- opts: string | { bin, args?, env?, cwd? }
 ```
 
 ### The `exec` Action
@@ -105,25 +102,25 @@ The `exec` action is the primary mechanism for executing operations during a bui
 
 ```lua
 -- Simple command (string) - bin only, no args
-ctx:exec("make")
+ctx:exec('make')
 
 -- Command with options (table)
 ctx:exec({
-  bin = "make",
-  args = { "install" },
-  cwd = "/build/src",
+  bin = 'make',
+  args = { 'install' },
+  cwd = '/build/src',
   env = { PREFIX = ctx.out },
 })
 ```
 
 **ExecOpts:**
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `bin` | string | Required: the binary/command to execute |
-| `args` | string[]? | Optional: arguments to pass to the command |
-| `cwd` | string? | Optional: working directory for the command |
-| `env` | table<string,string>? | Optional: environment variables for the command |
+| Field  | Type                  | Description                                     |
+| ------ | --------------------- | ----------------------------------------------- |
+| `bin`  | string                | Required: the binary/command to execute         |
+| `args` | string[]?             | Optional: arguments to pass to the command      |
+| `cwd`  | string?               | Optional: working directory for the command     |
+| `env`  | table<string,string>? | Optional: environment variables for the command |
 
 **Why `exec` instead of preset actions?**
 
@@ -133,21 +130,6 @@ ctx:exec({
 - **Composable**: Complex operations built from simple shell commands
 
 **Error handling:** All `ctx` operations throw on failure (Lua `error()`). A failed build leaves the user-facing system unchanged - atomic apply semantics ensure the pre-apply state is restored.
-
-### The `write_file` Action
-
-The `write_file` action creates or overwrites a file with specified contents:
-
-```lua
--- Write a configuration file
-ctx:write_file(ctx.out .. "/config.json", '{"debug": false}')
-
--- Write a shell script
-ctx:write_file(ctx.out .. "/bin/setup.sh", [[
-#!/bin/bash
-echo "Setting up..."
-]])
-```
 
 ## Build Return Value
 
@@ -208,7 +190,6 @@ The build system uses a two-tier type architecture:
 /// Actions that can be performed during a build
 pub enum Action {
     FetchUrl { url: String, sha256: String },
-    WriteFile { path: String, contents: String },
     Exec(ExecOpts),
 }
 
@@ -241,19 +222,15 @@ pub struct BuildCtx {
 impl BuildCtx {
     /// Returns a placeholder that resolves to the build's output directory
     pub fn out(&self) -> &'static str;
-    
+
     /// Fetch a URL with hash verification, returns an opaque reference
     /// that resolves to the downloaded file path at execution time
     pub fn fetch_url(&mut self, url: &str, sha256: &str) -> String;
-    
-    /// Write contents to a file, returns an opaque reference
-    /// that resolves to the file path at execution time
-    pub fn write_file(&mut self, path: &str, contents: &str) -> String;
-    
+
     /// Execute a command, returns an opaque reference
     /// that resolves to the command's stdout at execution time
     pub fn exec(&mut self, opts: impl Into<ExecOpts>) -> String;
-    
+
     /// Consume context and return accumulated actions
     pub fn into_actions(self) -> Vec<Action>;
 }
@@ -263,15 +240,15 @@ Note: `BuildRef` is not a separate Rust struct - it's a Lua table with a metatab
 
 ### Placeholder System
 
-Both `fetch_url`, `write_file`, and `exec` return opaque strings that can be stored in variables and used in subsequent commands. These are resolved during execution when action outputs become available.
+Both `fetch_url`, and `exec` return opaque strings that can be stored in variables and used in subsequent commands. These are resolved during execution when action outputs become available.
 
 ```lua
 create = function(inputs, ctx)
   -- fetch_url returns an opaque reference to the downloaded file
   local archive = ctx:fetch_url(inputs.src.url, inputs.src.sha256)
-  
+
   -- Use the reference in the next command - it resolves to the actual path at runtime
-  ctx:exec({ bin = "tar", args = { "-xzf", archive, "-C", "/build" } })
+  ctx:exec({ bin = 'tar', args = { '-xzf', archive, '-C', '/build' } })
 end
 ```
 
@@ -293,7 +270,9 @@ local ripgrep = sys.build({
   inputs = function()
     return {
       src = {
-        url = 'https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-' .. sys.platform .. '.tar.gz',
+        url = 'https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-'
+          .. sys.platform
+          .. '.tar.gz',
         sha256 = hashes[sys.platform],
       },
     }
@@ -301,7 +280,7 @@ local ripgrep = sys.build({
 
   create = function(inputs, ctx)
     local archive = ctx:fetch_url(inputs.src.url, inputs.src.sha256)
-    ctx:exec({ bin = "tar", args = { "-xzf", archive, "-C", ctx.out } })
+    ctx:exec({ bin = 'tar', args = { '-xzf', archive, '-C', ctx.out } })
     return { out = ctx.out }
   end,
 })
@@ -411,34 +390,6 @@ sys.bind({
   end,
   destroy = function(outputs, ctx)
     ctx:exec({ bin = 'rm', args = { outputs.target } })
-  end,
-})
-```
-
-### Env Builds
-
-```lua
-local modules = require('syslua.modules')
-
--- User writes:
-modules.env.setup({ EDITOR = 'nvim', PAGER = 'less' })
-
--- Internally becomes:
-local env_build = sys.build({
-  id = 'env-editor-pager',
-  inputs = { vars = { EDITOR = 'nvim', PAGER = 'less' } },
-  create = function(inputs, ctx)
-    -- Generate shell-specific fragments
-    ctx:write_file(ctx.out .. '/env.sh', 'export EDITOR="nvim"\nexport PAGER="less"')
-    ctx:write_file(ctx.out .. '/env.fish', 'set -gx EDITOR "nvim"\nset -gx PAGER "less"')
-    return { out = ctx.out }
-  end,
-})
-
-sys.bind({
-  inputs = { build = env_build },
-  create = function(inputs, ctx)
-    -- Shell integration handles sourcing these files
   end,
 })
 ```

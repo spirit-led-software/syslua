@@ -6,12 +6,14 @@
 ---@field env? table<string,string> Optional: environment variables
 ---@field cwd? string Optional: working directory
 
----@class ActionCtx
----@field out string returns the store path
----@field fetch_url fun(self: ActionCtx, url: string, sha256: string): string Fetches a URL and returns the store path
----@field write_file fun(self: ActionCtx, path: string, content: string): string Writes content to a file in the store,
----returns the store path
----@field exec fun(self: ActionCtx, opts: string | ExecOpts, args?: string[]): string Performs a command during application, returns stdout
+---@class BuildCtx
+---@field out string returns the store path placeholder
+---@field fetch_url fun(self: BuildCtx, url: string, sha256: string): string Fetches a URL and returns the store path
+---@field exec fun(self: BuildCtx, opts: string | ExecOpts, args?: string[]): string Performs a command during application, returns stdout
+
+---@class BindCtx
+---@field out string returns the store path placeholder
+---@field exec fun(self: BindCtx, opts: string | ExecOpts, args?: string[]): string Performs a command during application, returns stdout
 
 ---@class BuildRef
 ---@field id? string Build id
@@ -22,7 +24,7 @@
 ---@class BuildSpec
 ---@field id? string Required: build id, must be unique
 ---@field inputs? table|fun(): table Optional: input data
----@field create fun(inputs: table, ctx: ActionCtx): table Required: build logic, returns outputs
+---@field create fun(inputs: table, ctx: BuildCtx): table Required: build logic, returns outputs
 
 ---@class BindRef
 ---@field id? string Binding id
@@ -33,10 +35,9 @@
 ---@class BindSpec
 ---@field id? string Binding id. Required when providing update method
 ---@field inputs? table|fun(): table Optional: input data
----@field create fun(inputs: table, ctx: ActionCtx): table | nil Required: binding logic, optionally returns outputs
----@field update? fun(outputs: table, inputs: table, ctx: ActionCtx): table | nil Optional: update logic, optionally returns outputs
----@field destroy fun(outputs: table, ctx: ActionCtx): nil Optional: cleanup logic, receives outputs from create or
----update
+---@field create fun(inputs: table, ctx: BindCtx): table | nil Required: binding logic, optionally returns outputs
+---@field update? fun(outputs: table, inputs: table, ctx: BindCtx): table | nil Optional: update logic, optionally returns outputs
+---@field destroy fun(outputs: table, ctx: BindCtx): nil Required: cleanup logic, receives outputs from create or update
 
 ---@class PathHelpers
 ---@field resolve fun(...: string): string Resolves a sequence of path segments into an absolute path
@@ -61,8 +62,8 @@
 ---@field path PathHelpers File path utilities
 ---@field build fun(spec: BuildSpec): BuildRef Creates a build within the store
 ---@field bind fun(spec: BindSpec): BindRef Creates a binding to the active system
----@field register_ctx_method fun(name: string, fn: fun(ctx: ActionCtx, ...: any): any) Registers a custom method on ActionCtx
----@field unregister_ctx_method fun(name: string) Removes a registered custom method from ActionCtx
+---@field register_build_ctx_method fun(name: string, fn: fun(ctx: BuildCtx, ...: any): any) Registers a custom method on BuildCtx
+---@field register_bind_ctx_method fun(name: string, fn: fun(ctx: BindCtx, ...: any): any) Registers a custom method on BindCtx
 
 ---@type Sys
 ---@diagnostic disable-next-line: missing-fields

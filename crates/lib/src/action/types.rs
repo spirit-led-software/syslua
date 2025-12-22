@@ -2,8 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::actions::exec::ExecOpts;
 
-/// Key for storing registered ctx methods in Lua's registry.
-pub const CTX_METHODS_REGISTRY_KEY: &str = "__syslua_ctx_methods";
+/// Key for storing registered build ctx methods in Lua's registry.
+pub const BUILD_CTX_METHODS_REGISTRY_KEY: &str = "__syslua_build_ctx_methods";
+
+/// Key for storing registered bind ctx methods in Lua's registry.
+pub const BIND_CTX_METHODS_REGISTRY_KEY: &str = "__syslua_bind_ctx_methods";
 
 /// An action that can be performed during build execution.
 ///
@@ -13,7 +16,7 @@ pub const CTX_METHODS_REGISTRY_KEY: &str = "__syslua_ctx_methods";
 /// # Variants
 ///
 /// - [`FetchUrl`](Action::FetchUrl): Download a file with integrity verification
-/// - [`Cmd`](Action::Cmd): Execute a shell command
+/// - [`Exec`](Action::Exec): Execute a shell command
 ///
 /// # Placeholder Resolution
 ///
@@ -31,15 +34,6 @@ pub enum Action {
   /// - `url`: The URL to download
   /// - `sha256`: Expected SHA-256 hash of the downloaded content (lowercase hex)
   FetchUrl { url: String, sha256: String },
-  /// Write contents to a file at the specified path.
-  ///
-  /// This action creates or overwrites the file at `path` with `contents`.
-  ///
-  /// # Fields
-  ///
-  /// - `path`: The file path to write to
-  /// - `contents`: The contents to write into the file
-  WriteFile { path: String, contents: String },
   /// Execute a binary.
   ///
   /// # Fields
@@ -113,13 +107,6 @@ impl ActionCtx {
   /// ```
   pub fn out(&self) -> &'static str {
     "$${out}"
-  }
-
-  pub fn write_file(&mut self, path: &str, contents: &str) -> String {
-    self.record_action(Action::WriteFile {
-      path: path.to_string(),
-      contents: contents.to_string(),
-    })
   }
 
   /// Record a URL fetch action and return a placeholder for its output.
