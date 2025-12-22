@@ -1,0 +1,59 @@
+name: Documentation Improvement
+description: Suggest improvements or report issues with documentation
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us improve the documentation! Whether it's a typo, missing information, or a confusing explanation, we'd love to hear about it.
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type of Improvement
+      options:
+        - Fix typo or grammar
+        - Clarify existing documentation
+        - Add missing documentation
+        - Add or improve examples
+        - Fix incorrect information
+        - Improve organization / structure
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: Documentation Location
+      description: Which file or section needs improvement?
+      placeholder: "docs/architecture/02-binds.md or README.md"
+    validations:
+      required: true
+
+  - type: textarea
+    id: current
+    attributes:
+      label: Current Content
+      description: What does the documentation currently say? (Quote or link to the relevant section)
+      placeholder: Paste the current text or describe the issue...
+    validations:
+      required: false
+
+  - type: textarea
+    id: suggested
+    attributes:
+      label: Suggested Improvement
+      description: What should the documentation say instead? Or what's missing?
+      placeholder: Describe the improvement...
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Any other context that would help (e.g., what you were trying to do when you found the issue).
+      placeholder: Add any other context here...
+    validations:
+      required: false

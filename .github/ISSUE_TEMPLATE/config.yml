@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / Support
+    url: https://github.com/syslua/syslua/discussions/categories/q-a
+    about: Ask questions and get help from the community
+  - name: Ideas / Feedback
+    url: https://github.com/syslua/syslua/discussions/categories/ideas
+    about: Share ideas and general feedback
+  - name: Security Vulnerability
+    url: https://github.com/syslua/syslua/security/advisories/new
+    about: Report security vulnerabilities privately
