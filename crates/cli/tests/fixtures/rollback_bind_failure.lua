@@ -10,7 +10,7 @@ local TEST_DIR = os.getenv('TEST_OUTPUT_DIR') or '/tmp/syslua-test'
 local PHASE = os.getenv('TEST_PHASE') or 'initial'
 
 --- Cross-platform shell execution with PATH injection for sandbox.
---- @param ctx ActionCtx
+--- @param ctx BuildCtx | BindCtx
 --- @param script string
 --- @return string
 local function sh(ctx, script)

@@ -185,7 +185,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
   }
 
   // 1. Load current state
-  let snapshot_store = SnapshotStore::default_store();
+  let snapshot_store = SnapshotStore::default_store(&options.system);
   let current_snapshot = snapshot_store.load_current()?;
   let current_manifest = current_snapshot.as_ref().map(|s| &s.manifest);
 
@@ -399,7 +399,7 @@ pub async fn destroy(options: &DestroyOptions) -> Result<DestroyResult, ApplyErr
   info!("starting destroy");
 
   // 1. Load current state
-  let snapshot_store = SnapshotStore::default_store();
+  let snapshot_store = SnapshotStore::default_store(&options.system);
   let current_snapshot = snapshot_store.load_current()?;
 
   // 2. Early exit if no current snapshot (idempotent)
