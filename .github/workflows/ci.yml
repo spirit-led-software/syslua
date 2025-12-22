@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths-ignore:
       - "docs/**"
-      - "**.md"
+      - "examples/**"
+      - "**/*.md"
       - "LICENSE"
       - ".editorconfig"
       - ".stylua.toml"
+      - "cliff.toml"
 
 env:
   CARGO_TERM_COLOR: always

@@ -1,5 +1,4 @@
 pub mod actions;
-pub mod lua;
 mod types;
 
 pub use types::*;
@@ -12,10 +11,12 @@ use crate::placeholder::{self, Resolver};
 use actions::exec::ExecOpts;
 use actions::exec::execute_cmd;
 use actions::fetch_url::execute_fetch_url;
-use actions::write_file::execute_write_file;
 
-/// Names of built-in methods on ActionCtx that cannot be overwritten.
-pub const BUILTIN_CTX_METHODS: &[&str] = &["exec", "fetch_url", "write_file", "out"];
+/// Names of built-in methods on BuildCtx that cannot be overwritten.
+pub const BUILTIN_BUILD_CTX_METHODS: &[&str] = &["exec", "fetch_url", "out"];
+
+/// Names of built-in methods on BindCtx that cannot be overwritten.
+pub const BUILTIN_BIND_CTX_METHODS: &[&str] = &["exec", "out"];
 
 /// Execute a single build action.
 ///
@@ -46,18 +47,6 @@ pub async fn execute_action(
 
       Ok(ActionResult {
         output: path.to_string_lossy().to_string(),
-      })
-    }
-
-    Action::WriteFile { path, contents } => {
-      let resolved_path = placeholder::substitute(path, resolver)?;
-      let resolved_contents = placeholder::substitute(contents, resolver)?;
-
-      let full_path = out_dir.join(resolved_path);
-      execute_write_file(&full_path, &resolved_contents).await?;
-
-      Ok(ActionResult {
-        output: full_path.to_string_lossy().to_string(),
       })
     }
 

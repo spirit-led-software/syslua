@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-  action::Action,
+  action::{Action, ActionCtx, actions::exec::ExecOpts},
   util::hash::{Hashable, ObjectHash},
 };
 
@@ -112,6 +112,43 @@ pub struct BuildDef {
 }
 
 impl Hashable for BuildDef {}
+
+/// Context for build `create` functions.
+///
+/// Provides `fetch_url`, `exec`, and `out` for recording build actions.
+/// This is a newtype wrapper around [`ActionCtx`] that exposes the full
+/// set of build-specific methods.
+#[derive(Default)]
+pub struct BuildCtx(ActionCtx);
+
+impl BuildCtx {
+  /// Create a new empty build context.
+  pub fn new() -> Self {
+    Self(ActionCtx::new())
+  }
+
+  /// Returns a placeholder string that resolves to the build's output directory.
+  pub fn out(&self) -> &'static str {
+    self.0.out()
+  }
+
+  /// Record a URL fetch action and return a placeholder for its output.
+  ///
+  /// This method is only available in build contexts, not bind contexts.
+  pub fn fetch_url(&mut self, url: &str, sha256: &str) -> String {
+    self.0.fetch_url(url, sha256)
+  }
+
+  /// Record a command execution action and return a placeholder for its output.
+  pub fn exec(&mut self, opts: impl Into<ExecOpts>) -> String {
+    self.0.exec(opts)
+  }
+
+  /// Consume the context and return the recorded actions.
+  pub fn into_actions(self) -> Vec<Action> {
+    self.0.into_actions()
+  }
+}
 
 #[cfg(test)]
 mod tests {

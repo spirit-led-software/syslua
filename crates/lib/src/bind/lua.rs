@@ -1,7 +1,7 @@
 //! Lua bindings for `sys.bind{}`.
 //!
 //! This module provides:
-//! - `ActionCtx` as LuaUserData with methods like `exec`
+//! - `BindCtx` as LuaUserData with methods like `exec`
 //! - `register_sys_bind()` to register the `sys.bind` function
 
 use std::cell::RefCell;
@@ -10,7 +10,8 @@ use std::rc::Rc;
 
 use mlua::prelude::*;
 
-use crate::action::ActionCtx;
+use crate::action::BIND_CTX_METHODS_REGISTRY_KEY;
+use crate::action::actions::exec::parse_exec_opts;
 use crate::bind::BindInputs;
 use crate::build::BUILD_REF_TYPE;
 use crate::build::lua::build_hash_to_lua;
@@ -18,7 +19,40 @@ use crate::manifest::Manifest;
 use crate::outputs::lua::{outputs_to_lua_table, parse_outputs};
 use crate::util::hash::{Hashable, ObjectHash};
 
-use super::{BIND_REF_TYPE, BindDef};
+use super::{BIND_REF_TYPE, BindCtx, BindDef};
+
+impl LuaUserData for BindCtx {
+  fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+    fields.add_field_method_get("out", |_, this| Ok(this.out().to_string()));
+  }
+
+  fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+    // NO fetch_url here - binds should only use build outputs
+
+    methods.add_method_mut("exec", |_, this, (opts, args): (LuaValue, Option<LuaValue>)| {
+      let cmd_opts = parse_exec_opts(opts, args)?;
+      Ok(this.exec(cmd_opts))
+    });
+
+    // Fallback for custom registered methods (bind-specific registry)
+    methods.add_meta_method(mlua::MetaMethod::Index, |lua, _this, key: String| {
+      let registry: LuaTable = lua.named_registry_value(BIND_CTX_METHODS_REGISTRY_KEY)?;
+      let func: LuaValue = registry.get(key.as_str())?;
+
+      match func {
+        LuaValue::Function(_) => Ok(func),
+        LuaValue::Nil => Err(LuaError::external(format!(
+          "unknown bind ctx method '{}'. Use sys.register_bind_ctx_method to add custom methods.",
+          key
+        ))),
+        _ => Err(LuaError::external(format!(
+          "bind ctx method '{}' is not a function",
+          key
+        ))),
+      }
+    });
+  }
+}
 
 /// Convert a Lua value to BindInputsRef (for resolved/static inputs).
 ///
@@ -215,8 +249,8 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
       None => None,
     };
 
-    // 3. Create ActionCtx and call the create function
-    let mut create_ctx = ActionCtx::new();
+    // 3. Create BindCtx and call the create function
+    let mut create_ctx = BindCtx::new();
     let create_ctx_userdata = lua.create_userdata(create_ctx)?;
 
     // Prepare inputs argument for create function
@@ -255,7 +289,7 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
     };
 
     let update_actions = if let Some(update_fn) = update_fn {
-      let update_ctx = ActionCtx::new();
+      let update_ctx = BindCtx::new();
       let update_ctx_userdata = lua.create_userdata(update_ctx)?;
 
       // Call: update(outputs, inputs, ctx) -> outputs (must match create's output keys)
@@ -303,7 +337,7 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
         }
       }
 
-      let update_ctx: ActionCtx = update_ctx_userdata.take()?;
+      let update_ctx: BindCtx = update_ctx_userdata.take()?;
       let update_actions = update_ctx.into_actions();
       if update_actions.is_empty() {
         None
@@ -316,13 +350,13 @@ pub fn register_sys_bind(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<M
 
     // 6. Call destroy function
     let destroy_actions = {
-      let destroy_ctx = ActionCtx::new();
+      let destroy_ctx = BindCtx::new();
       let destroy_ctx_userdata = lua.create_userdata(destroy_ctx)?;
 
       // Call: destroy(outputs, ctx) -> ignored
       let _: LuaValue = destroy_fn.call((outputs_arg, &destroy_ctx_userdata))?;
 
-      let destroy_ctx: ActionCtx = destroy_ctx_userdata.take()?;
+      let destroy_ctx: BindCtx = destroy_ctx_userdata.take()?;
       destroy_ctx.into_actions()
     };
 
@@ -1262,6 +1296,36 @@ mod tests {
       assert!(
         err.contains("update returned nil but create returned outputs"),
         "error should mention create has outputs: {}",
+        err
+      );
+
+      Ok(())
+    }
+
+    #[test]
+    fn bind_ctx_does_not_have_fetch_url() -> LuaResult<()> {
+      let (lua, _) = create_test_lua_with_manifest()?;
+
+      let result = lua
+        .load(
+          r#"
+                return sys.bind({
+                    id = "fetch-url-test",
+                    create = function(inputs, ctx)
+                        ctx:fetch_url("http://example.com", "abc123")
+                    end,
+                    destroy = function(outputs, ctx)
+                    end,
+                })
+            "#,
+        )
+        .eval::<LuaTable>();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(
+        err.contains("unknown bind ctx method 'fetch_url'"),
+        "error should mention fetch_url is not available: {}",
         err
       );
 

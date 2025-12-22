@@ -7,8 +7,8 @@
 //! - `sys.path` - Path manipulation utilities
 //! - `sys.build{}` - Define a build
 //! - `sys.bind{}` - Define a bind
-//! - `sys.register_ctx_method()` - Register a custom ActionCtx method
-//! - `sys.unregister_ctx_method()` - Remove a registered ActionCtx method
+//! - `sys.register_build_ctx_method()` - Register a custom BuildCtx method
+//! - `sys.register_bind_ctx_method()` - Register a custom BindCtx method
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,7 +16,9 @@ use std::rc::Rc;
 use mlua::prelude::*;
 
 use super::helpers;
-use crate::action::{BUILTIN_CTX_METHODS, CTX_METHODS_REGISTRY_KEY};
+use crate::action::{
+  BIND_CTX_METHODS_REGISTRY_KEY, BUILD_CTX_METHODS_REGISTRY_KEY, BUILTIN_BIND_CTX_METHODS, BUILTIN_BUILD_CTX_METHODS,
+};
 use crate::bind::lua::register_sys_bind;
 use crate::build::lua::register_sys_build;
 use crate::manifest::Manifest;
@@ -46,32 +48,55 @@ pub fn register_globals(lua: &Lua, manifest: Rc<RefCell<Manifest>>) -> LuaResult
   // Register sys.bind{}
   register_sys_bind(lua, &sys, manifest)?;
 
-  // Initialize the ctx method registry (empty table)
-  lua.set_named_registry_value(CTX_METHODS_REGISTRY_KEY, lua.create_table()?)?;
+  // Initialize the build and bind ctx method registries (empty tables)
+  lua.set_named_registry_value(BUILD_CTX_METHODS_REGISTRY_KEY, lua.create_table()?)?;
+  lua.set_named_registry_value(BIND_CTX_METHODS_REGISTRY_KEY, lua.create_table()?)?;
 
-  // Register sys.register_ctx_method(name, fn)
-  let register_ctx_method = lua.create_function(|lua, (name, func): (String, LuaFunction)| {
+  // Register sys.register_build_ctx_method(name, fn)
+  let register_build_ctx_method = lua.create_function(|lua, (name, func): (String, LuaFunction)| {
     // Prevent overwriting built-in methods
-    if BUILTIN_CTX_METHODS.contains(&name.as_str()) {
+    if BUILTIN_BUILD_CTX_METHODS.contains(&name.as_str()) {
       return Err(LuaError::external(format!(
-        "cannot override built-in ctx method '{}'",
+        "cannot override built-in build ctx method '{}'",
         name
       )));
     }
 
-    let registry: LuaTable = lua.named_registry_value(CTX_METHODS_REGISTRY_KEY)?;
+    let registry: LuaTable = lua.named_registry_value(BUILD_CTX_METHODS_REGISTRY_KEY)?;
+
+    // Warn if overwriting an existing custom method
+    let existing: LuaValue = registry.get(name.as_str())?;
+    if !existing.is_nil() {
+      tracing::warn!(method = %name, "overwriting existing build ctx method");
+    }
+
     registry.set(name, func)?;
     Ok(())
   })?;
-  sys.set("register_ctx_method", register_ctx_method)?;
+  sys.set("register_build_ctx_method", register_build_ctx_method)?;
 
-  // Register sys.unregister_ctx_method(name)
-  let unregister_ctx_method = lua.create_function(|lua, name: String| {
-    let registry: LuaTable = lua.named_registry_value(CTX_METHODS_REGISTRY_KEY)?;
-    registry.set(name, LuaValue::Nil)?;
+  // Register sys.register_bind_ctx_method(name, fn)
+  let register_bind_ctx_method = lua.create_function(|lua, (name, func): (String, LuaFunction)| {
+    // Prevent overwriting built-in methods
+    if BUILTIN_BIND_CTX_METHODS.contains(&name.as_str()) {
+      return Err(LuaError::external(format!(
+        "cannot override built-in bind ctx method '{}'",
+        name
+      )));
+    }
+
+    let registry: LuaTable = lua.named_registry_value(BIND_CTX_METHODS_REGISTRY_KEY)?;
+
+    // Warn if overwriting an existing custom method
+    let existing: LuaValue = registry.get(name.as_str())?;
+    if !existing.is_nil() {
+      tracing::warn!(method = %name, "overwriting existing bind ctx method");
+    }
+
+    registry.set(name, func)?;
     Ok(())
   })?;
-  sys.set("unregister_ctx_method", unregister_ctx_method)?;
+  sys.set("register_bind_ctx_method", register_bind_ctx_method)?;
 
   // Register as global
   lua.globals().set("sys", sys)?;
@@ -302,117 +327,175 @@ mod tests {
     use super::*;
 
     #[test]
-    fn register_ctx_method_exists() -> LuaResult<()> {
+    fn register_build_ctx_method_exists() -> LuaResult<()> {
       let lua = create_test_lua()?;
       let sys: LuaTable = lua.globals().get("sys")?;
-      assert!(sys.contains_key("register_ctx_method")?);
-      assert!(sys.contains_key("unregister_ctx_method")?);
+      assert!(sys.contains_key("register_build_ctx_method")?);
+      assert!(sys.contains_key("register_bind_ctx_method")?);
       Ok(())
     }
 
     #[test]
-    fn register_ctx_method_adds_to_registry() -> LuaResult<()> {
+    fn register_build_ctx_method_adds_to_registry() -> LuaResult<()> {
       let lua = create_test_lua()?;
       lua
         .load(
           r#"
-        sys.register_ctx_method("my_custom_method", function(ctx, arg)
+        sys.register_build_ctx_method("my_custom_method", function(ctx, arg)
           return "called with: " .. arg
         end)
         "#,
         )
         .exec()?;
 
-      // Verify the method was registered
-      let registry: LuaTable = lua.named_registry_value(crate::action::CTX_METHODS_REGISTRY_KEY)?;
+      // Verify the method was registered in build registry
+      let registry: LuaTable = lua.named_registry_value(BUILD_CTX_METHODS_REGISTRY_KEY)?;
       assert!(registry.contains_key("my_custom_method")?);
       Ok(())
     }
 
     #[test]
-    fn unregister_ctx_method_removes_from_registry() -> LuaResult<()> {
+    fn register_bind_ctx_method_adds_to_registry() -> LuaResult<()> {
       let lua = create_test_lua()?;
       lua
         .load(
           r#"
-        sys.register_ctx_method("temp_method", function(ctx) return "temp" end)
-        sys.unregister_ctx_method("temp_method")
+        sys.register_bind_ctx_method("my_bind_method", function(ctx, arg)
+          return "bind called with: " .. arg
+        end)
         "#,
         )
         .exec()?;
 
-      // Verify the method was removed
-      let registry: LuaTable = lua.named_registry_value(crate::action::CTX_METHODS_REGISTRY_KEY)?;
-      let value: LuaValue = registry.get("temp_method")?;
-      assert!(value.is_nil());
+      // Verify the method was registered in bind registry
+      let registry: LuaTable = lua.named_registry_value(BIND_CTX_METHODS_REGISTRY_KEY)?;
+      assert!(registry.contains_key("my_bind_method")?);
       Ok(())
     }
 
     #[test]
-    fn cannot_override_builtin_exec() -> LuaResult<()> {
+    fn build_and_bind_registries_are_separate() -> LuaResult<()> {
+      let lua = create_test_lua()?;
+      lua
+        .load(
+          r#"
+        sys.register_build_ctx_method("build_only", function(ctx) return "build" end)
+        sys.register_bind_ctx_method("bind_only", function(ctx) return "bind" end)
+        "#,
+        )
+        .exec()?;
+
+      // Verify registries are separate
+      let build_registry: LuaTable = lua.named_registry_value(BUILD_CTX_METHODS_REGISTRY_KEY)?;
+      let bind_registry: LuaTable = lua.named_registry_value(BIND_CTX_METHODS_REGISTRY_KEY)?;
+
+      assert!(build_registry.contains_key("build_only")?);
+      assert!(!build_registry.contains_key("bind_only")?);
+
+      assert!(bind_registry.contains_key("bind_only")?);
+      assert!(!bind_registry.contains_key("build_only")?);
+      Ok(())
+    }
+
+    #[test]
+    fn cannot_override_builtin_exec_in_build() -> LuaResult<()> {
       let lua = create_test_lua()?;
       let result = lua
         .load(
           r#"
-        sys.register_ctx_method("exec", function(ctx) return "hacked" end)
+        sys.register_build_ctx_method("exec", function(ctx) return "hacked" end)
         "#,
         )
         .exec();
 
       assert!(result.is_err());
       let err = result.unwrap_err().to_string();
-      assert!(err.contains("cannot override built-in ctx method 'exec'"));
+      assert!(err.contains("cannot override built-in build ctx method 'exec'"));
       Ok(())
     }
 
     #[test]
-    fn cannot_override_builtin_fetch_url() -> LuaResult<()> {
+    fn cannot_override_builtin_exec_in_bind() -> LuaResult<()> {
       let lua = create_test_lua()?;
       let result = lua
         .load(
           r#"
-        sys.register_ctx_method("fetch_url", function(ctx) return "hacked" end)
+        sys.register_bind_ctx_method("exec", function(ctx) return "hacked" end)
         "#,
         )
         .exec();
 
       assert!(result.is_err());
       let err = result.unwrap_err().to_string();
-      assert!(err.contains("cannot override built-in ctx method 'fetch_url'"));
+      assert!(err.contains("cannot override built-in bind ctx method 'exec'"));
       Ok(())
     }
 
     #[test]
-    fn cannot_override_builtin_write_file() -> LuaResult<()> {
+    fn cannot_override_builtin_fetch_url_in_build() -> LuaResult<()> {
       let lua = create_test_lua()?;
       let result = lua
         .load(
           r#"
-        sys.register_ctx_method("write_file", function(ctx) return "hacked" end)
+        sys.register_build_ctx_method("fetch_url", function(ctx) return "hacked" end)
         "#,
         )
         .exec();
 
       assert!(result.is_err());
       let err = result.unwrap_err().to_string();
-      assert!(err.contains("cannot override built-in ctx method 'write_file'"));
+      assert!(err.contains("cannot override built-in build ctx method 'fetch_url'"));
       Ok(())
     }
 
     #[test]
-    fn cannot_override_builtin_out() -> LuaResult<()> {
+    fn can_register_fetch_url_in_bind() -> LuaResult<()> {
+      // fetch_url is NOT a builtin for BindCtx, so this should succeed
+      let lua = create_test_lua()?;
+      lua
+        .load(
+          r#"
+        sys.register_bind_ctx_method("fetch_url", function(ctx) return "custom fetch" end)
+        "#,
+        )
+        .exec()?;
+
+      let registry: LuaTable = lua.named_registry_value(BIND_CTX_METHODS_REGISTRY_KEY)?;
+      assert!(registry.contains_key("fetch_url")?);
+      Ok(())
+    }
+
+    #[test]
+    fn cannot_override_builtin_out_in_build() -> LuaResult<()> {
       let lua = create_test_lua()?;
       let result = lua
         .load(
           r#"
-        sys.register_ctx_method("out", function(ctx) return "hacked" end)
+        sys.register_build_ctx_method("out", function(ctx) return "hacked" end)
         "#,
         )
         .exec();
 
       assert!(result.is_err());
       let err = result.unwrap_err().to_string();
-      assert!(err.contains("cannot override built-in ctx method 'out'"));
+      assert!(err.contains("cannot override built-in build ctx method 'out'"));
+      Ok(())
+    }
+
+    #[test]
+    fn cannot_override_builtin_out_in_bind() -> LuaResult<()> {
+      let lua = create_test_lua()?;
+      let result = lua
+        .load(
+          r#"
+        sys.register_bind_ctx_method("out", function(ctx) return "hacked" end)
+        "#,
+        )
+        .exec();
+
+      assert!(result.is_err());
+      let err = result.unwrap_err().to_string();
+      assert!(err.contains("cannot override built-in bind ctx method 'out'"));
       Ok(())
     }
   }

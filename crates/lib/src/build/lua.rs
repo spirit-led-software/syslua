@@ -11,14 +11,50 @@ use std::rc::Rc;
 
 use mlua::prelude::*;
 
-use crate::action::ActionCtx;
+use crate::action::BUILD_CTX_METHODS_REGISTRY_KEY;
+use crate::action::actions::exec::parse_exec_opts;
 use crate::build::BuildInputs;
 use crate::manifest::Manifest;
 use crate::outputs::lua::parse_outputs;
 use crate::util::hash::Hashable;
 use crate::{bind::BIND_REF_TYPE, util::hash::ObjectHash};
 
-use super::{BUILD_REF_TYPE, BuildDef};
+use super::{BUILD_REF_TYPE, BuildCtx, BuildDef};
+
+impl LuaUserData for BuildCtx {
+  fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
+    fields.add_field_method_get("out", |_, this| Ok(this.out().to_string()));
+  }
+
+  fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
+    methods.add_method_mut("fetch_url", |_, this, (url, sha256): (String, String)| {
+      Ok(this.fetch_url(&url, &sha256))
+    });
+
+    methods.add_method_mut("exec", |_, this, (opts, args): (LuaValue, Option<LuaValue>)| {
+      let cmd_opts = parse_exec_opts(opts, args)?;
+      Ok(this.exec(cmd_opts))
+    });
+
+    // Fallback for custom registered methods (build-specific registry)
+    methods.add_meta_method(mlua::MetaMethod::Index, |lua, _this, key: String| {
+      let registry: LuaTable = lua.named_registry_value(BUILD_CTX_METHODS_REGISTRY_KEY)?;
+      let func: LuaValue = registry.get(key.as_str())?;
+
+      match func {
+        LuaValue::Function(_) => Ok(func),
+        LuaValue::Nil => Err(LuaError::external(format!(
+          "unknown build ctx method '{}'. Use sys.register_build_ctx_method to add custom methods.",
+          key
+        ))),
+        _ => Err(LuaError::external(format!(
+          "build ctx method '{}' is not a function",
+          key
+        ))),
+      }
+    });
+  }
+}
 
 /// Convert a Lua value to BuildInputsRef (for resolved/static inputs).
 ///
@@ -190,7 +226,7 @@ pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<
     };
 
     // 3. Create BuildCtx and call the create function
-    let ctx = ActionCtx::new();
+    let ctx = BuildCtx::new();
     let ctx_userdata = lua.create_userdata(ctx)?;
 
     // Prepare inputs argument for create function
@@ -221,8 +257,8 @@ pub fn register_sys_build(lua: &Lua, sys_table: &LuaTable, manifest: Rc<RefCell<
       }
     };
 
-    // 5. Extract actions from ActionCtx
-    let ctx: ActionCtx = ctx_userdata.take()?;
+    // 5. Extract actions from BuildCtx
+    let ctx: BuildCtx = ctx_userdata.take()?;
 
     // 6. Create BuildDef
     let build_def = BuildDef {
