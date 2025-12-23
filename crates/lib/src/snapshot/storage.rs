@@ -15,6 +15,7 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::platform::paths::data_dir;
+use crate::platform::paths::root_dir;
 
 use super::types::{
   SNAPSHOT_INDEX_VERSION, Snapshot, SnapshotError, SnapshotIndex, SnapshotMetadata, generate_snapshot_id,
@@ -42,12 +43,20 @@ impl SnapshotStore {
     Self { base_path }
   }
 
+  /// Get the base path of this store (for debugging).
+  pub fn base_path(&self) -> &PathBuf {
+    &self.base_path
+  }
+
   /// Create a snapshot store at the default location.
   ///
   /// Uses the platform-specific data directory:
   /// - Linux/macOS: `~/.local/share/syslua/snapshots`
   /// - Windows: `%APPDATA%\syslua\snapshots`
-  pub fn default_store() -> Self {
+  pub fn default_store(system: &bool) -> Self {
+    if *system {
+      return Self::new(root_dir().join(SNAPSHOTS_DIR));
+    }
     Self::new(data_dir().join(SNAPSHOTS_DIR))
   }
 

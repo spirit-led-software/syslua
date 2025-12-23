@@ -2,7 +2,7 @@
 --- Tests shell execution within the sandbox environment.
 
 --- Cross-platform shell execution with PATH injection for sandbox.
---- @param ctx ActionCtx
+--- @param ctx BuildCtx | BindCtx
 --- @param script string
 --- @return string
 local function sh(ctx, script)

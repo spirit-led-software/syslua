@@ -2,7 +2,7 @@
 --- Tests that multiple builds are realized in the correct order.
 
 --- Cross-platform shell execution with PATH injection for sandbox.
---- @param ctx ActionCtx
+--- @param ctx BuildCtx | BindCtx
 --- @param script string
 --- @return string
 local function sh(ctx, script)
@@ -49,7 +49,14 @@ return {
       inputs = { data = data_build },
       create = function(inputs, ctx)
         if sys.os == 'windows' then
-          sh(ctx, 'Get-Content -Path "' .. inputs.data.outputs.data_file .. '" | Set-Content -Path "' .. ctx.out .. '\\processed.txt"')
+          sh(
+            ctx,
+            'Get-Content -Path "'
+              .. inputs.data.outputs.data_file
+              .. '" | Set-Content -Path "'
+              .. ctx.out
+              .. '\\processed.txt"'
+          )
         else
           sh(ctx, 'cat ' .. inputs.data.outputs.data_file .. ' > ' .. ctx.out .. '/processed.txt')
         end

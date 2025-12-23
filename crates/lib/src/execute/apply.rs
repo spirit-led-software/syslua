@@ -132,6 +132,29 @@ pub struct ApplyOptions {
   pub dry_run: bool,
 }
 
+/// Options for the destroy operation.
+#[derive(Debug, Clone, Default)]
+pub struct DestroyOptions {
+  /// Execution configuration (parallelism, etc.)
+  pub execute: ExecuteConfig,
+
+  /// Whether to use the system store (vs user store).
+  pub system: bool,
+
+  /// Dry run mode - show what would be destroyed without making changes.
+  pub dry_run: bool,
+}
+
+/// Result of a destroy operation.
+#[derive(Debug)]
+pub struct DestroyResult {
+  /// Number of binds that were destroyed.
+  pub binds_destroyed: usize,
+
+  /// Number of builds now orphaned (left for future GC).
+  pub builds_orphaned: usize,
+}
+
 /// Apply a configuration file.
 ///
 /// This is the main entry point for `sys apply`. It:
@@ -162,7 +185,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
   }
 
   // 1. Load current state
-  let snapshot_store = SnapshotStore::default_store();
+  let snapshot_store = SnapshotStore::default_store(&options.system);
   let current_snapshot = snapshot_store.load_current()?;
   let current_manifest = current_snapshot.as_ref().map(|s| &s.manifest);
 
@@ -356,6 +379,118 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
   })
 }
 
+/// Destroy all binds from the current snapshot.
+///
+/// This is the main entry point for `sys destroy`. It:
+/// 1. Loads current snapshot (if any)
+/// 2. Returns early with success if no current snapshot exists (idempotent)
+/// 3. Destroys all binds from the snapshot in reverse dependency order
+/// 4. Cleans up bind state files
+/// 5. Clears the current snapshot pointer
+///
+/// # Arguments
+///
+/// * `options` - Destroy options
+///
+/// # Returns
+///
+/// A [`DestroyResult`] containing counts of destroyed binds and orphaned builds.
+pub async fn destroy(options: &DestroyOptions) -> Result<DestroyResult, ApplyError> {
+  info!(system = options.system, dry_run = options.dry_run, "starting destroy");
+
+  // 1. Load current state
+  let snapshot_store = SnapshotStore::default_store(&options.system);
+  debug!(snapshot_store_path = ?snapshot_store.base_path(), "using snapshot store");
+  let current_snapshot = snapshot_store.load_current()?;
+
+  // 2. Early exit if no current snapshot (idempotent)
+  let snapshot = match current_snapshot {
+    Some(s) => s,
+    None => {
+      info!("no current snapshot, nothing to destroy");
+      return Ok(DestroyResult {
+        binds_destroyed: 0,
+        builds_orphaned: 0,
+      });
+    }
+  };
+
+  let manifest = &snapshot.manifest;
+  let bind_count = manifest.bindings.len();
+  let build_count = manifest.builds.len();
+
+  info!(
+    binds = bind_count,
+    builds = build_count,
+    snapshot_id = %snapshot.id,
+    "loaded current snapshot"
+  );
+
+  // Early exit if no binds to destroy
+  if bind_count == 0 {
+    info!("no binds to destroy");
+    snapshot_store.clear_current()?;
+    return Ok(DestroyResult {
+      binds_destroyed: 0,
+      builds_orphaned: build_count,
+    });
+  }
+
+  // Dry run - return without making changes
+  if options.dry_run {
+    info!("dry run - not destroying");
+    return Ok(DestroyResult {
+      binds_destroyed: bind_count,
+      builds_orphaned: build_count,
+    });
+  }
+
+  // 3. Get all bind hashes from the manifest
+  let bind_hashes: Vec<ObjectHash> = manifest.bindings.keys().cloned().collect();
+
+  // 4. Destroy all binds
+  // We use destroy_removed_binds which handles:
+  // - Loading bind state for each bind
+  // - Creating the resolver for destroy actions
+  // - Executing destroy_actions with proper error handling
+  // - Returning which binds were destroyed
+  let destroyed_hashes = match destroy_removed_binds(&bind_hashes, Some(manifest), &options.execute).await {
+    Ok(hashes) => hashes,
+    Err(destroy_err) => {
+      // Partial failure - some binds destroyed, one failed
+      // We don't restore here (unlike apply) - user can retry destroy
+      error!(
+        failed_hash = %destroy_err.failed_hash.0,
+        destroyed_count = destroy_err.destroyed.len(),
+        error = %destroy_err.source,
+        "destroy failed partway through"
+      );
+
+      // Clean up state files for binds that were successfully destroyed
+      if let Err(e) = cleanup_destroyed_bind_states(&destroy_err.destroyed, options.system) {
+        warn!(error = %e, "failed to clean up some bind state files");
+      }
+
+      return Err(ApplyError::DestroyFailed {
+        hash: destroy_err.failed_hash,
+        source: destroy_err.source,
+      });
+    }
+  };
+
+  // 5. Clean up bind state files
+  cleanup_destroyed_bind_states(&destroyed_hashes, options.system)?;
+
+  // 6. Clear the current snapshot pointer
+  snapshot_store.clear_current()?;
+  info!(binds_destroyed = destroyed_hashes.len(), "destroy complete");
+
+  Ok(DestroyResult {
+    binds_destroyed: destroyed_hashes.len(),
+    builds_orphaned: build_count,
+  })
+}
+
 /// Build an execution manifest containing only items that need work.
 ///
 /// Filters the desired manifest to include:
@@ -406,7 +541,8 @@ async fn destroy_removed_binds(
     return Ok(Vec::new());
   }
 
-  info!(count = hashes.len(), "destroying removed binds");
+  info!(count = hashes.len(), system = config.system, "destroying removed binds");
+  debug!(bind_hashes = ?hashes.iter().map(|h| &h.0).collect::<Vec<_>>(), "binds to destroy");
 
   let mut destroyed = Vec::new();
 
@@ -423,12 +559,23 @@ async fn destroy_removed_binds(
     config.system,
   );
 
+  // Log the bind state directory for debugging
+  let bind_store_path = crate::store::paths::StorePaths::user_store_path().join("bind");
+  debug!(bind_store_path = ?bind_store_path, "checking bind state directory");
+
   for hash in hashes {
+    // Log the expected bind state path
+    let bind_state_path = crate::bind::store::bind_dir_path(hash, config.system);
+    debug!(bind = %hash.0, bind_state_path = ?bind_state_path, "looking for bind state");
+
     // Load bind state (outputs from when it was applied)
     let bind_state = match load_bind_state(hash, config.system) {
-      Ok(Some(state)) => state,
+      Ok(Some(state)) => {
+        debug!(bind = %hash.0, outputs = ?state.outputs, "loaded bind state");
+        state
+      }
       Ok(None) => {
-        warn!(bind = %hash.0, "no bind state found, skipping destroy");
+        warn!(bind = %hash.0, bind_state_path = ?bind_state_path, "no bind state found, skipping destroy");
         continue;
       }
       Err(e) => {
@@ -446,7 +593,14 @@ async fn destroy_removed_binds(
 
     // Get bind definition from current manifest
     let bind_def = match current_manifest.and_then(|m| m.bindings.get(hash)) {
-      Some(def) => def,
+      Some(def) => {
+        debug!(
+          bind = %hash.0,
+          destroy_actions_count = def.destroy_actions.len(),
+          "found bind definition"
+        );
+        def
+      }
       None => {
         warn!(bind = %hash.0, "bind definition not found in current manifest, skipping");
         continue;
@@ -460,7 +614,7 @@ async fn destroy_removed_binds(
     };
 
     // Execute destroy
-    info!(bind = %hash.0, "destroying bind");
+    info!(bind = %hash.0, destroy_actions = bind_def.destroy_actions.len(), "destroying bind");
     if let Err(e) = destroy_bind(hash, bind_def, &bind_result, &resolver).await {
       error!(bind = %hash.0, error = %e, "failed to destroy bind");
       return Err(DestroyPhaseError {
@@ -472,7 +626,7 @@ async fn destroy_removed_binds(
 
     // Track successful destruction (state file cleanup is deferred)
     destroyed.push(hash.clone());
-    debug!(bind = %hash.0, "bind destroyed");
+    info!(bind = %hash.0, "bind destroyed successfully");
   }
 
   info!(count = destroyed.len(), "destroy phase complete");
