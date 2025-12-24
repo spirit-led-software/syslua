@@ -266,7 +266,7 @@ pub fn resolve_path(path_str: &str, config_dir: &Path) -> Result<PathBuf, FetchE
   };
 
   // Canonicalize to get absolute path and verify existence
-  let canonical = expanded.canonicalize().map_err(|e| {
+  let canonical = dunce::canonicalize(&expanded).map_err(|e| {
     if e.kind() == std::io::ErrorKind::NotFound {
       FetchError::PathNotFound(expanded.clone())
     } else {
@@ -301,7 +301,7 @@ mod tests {
 
       temp_env::with_var("HOME", Some(home.to_str().unwrap()), || {
         let result = resolve_path("~/dotfiles", Path::new("/unused")).unwrap();
-        assert_eq!(result, dotfiles.canonicalize().unwrap());
+        assert_eq!(result, dunce::canonicalize(&dotfiles).unwrap());
       });
     }
 
@@ -313,7 +313,7 @@ mod tests {
 
       temp_env::with_var("HOME", Some(home.to_str().unwrap()), || {
         let result = resolve_path("~", Path::new("/unused")).unwrap();
-        assert_eq!(result, home.canonicalize().unwrap());
+        assert_eq!(result, dunce::canonicalize(home).unwrap());
       });
     }
 
@@ -327,7 +327,7 @@ mod tests {
       fs::create_dir(&subdir).unwrap();
 
       let result = resolve_path("./local-config", config_dir).unwrap();
-      assert_eq!(result, subdir.canonicalize().unwrap());
+      assert_eq!(result, dunce::canonicalize(&subdir).unwrap());
     }
 
     #[test]
@@ -336,7 +336,7 @@ mod tests {
       let abs_path = temp_dir.path();
 
       let result = resolve_path(abs_path.to_str().unwrap(), Path::new("/unused")).unwrap();
-      assert_eq!(result, abs_path.canonicalize().unwrap());
+      assert_eq!(result, dunce::canonicalize(abs_path).unwrap());
     }
 
     #[test]
