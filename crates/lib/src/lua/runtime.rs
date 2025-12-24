@@ -29,8 +29,7 @@ pub fn create_runtime(manifest: Rc<RefCell<Manifest>>) -> LuaResult<Lua> {
 /// Sets the `sys.dir` global to the directory of the loaded file.
 /// Returns the result of the file execution.
 pub fn load_file(lua: &Lua, path: &Path) -> LuaResult<LuaValue> {
-  let canonical_path = path
-    .canonicalize()
+  let canonical_path = dunce::canonicalize(path)
     .map_err(|e| LuaError::external(format!("cannot canonicalize '{}': {}", path.display(), e)))?;
   let content = std::fs::read_to_string(&canonical_path)
     .map_err(|e| LuaError::external(format!("cannot read '{}': {}", canonical_path.display(), e)))?;

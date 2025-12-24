@@ -1117,7 +1117,7 @@ return {{
       let utils_resolved = lib_resolved.inputs.get("utils").unwrap();
 
       // The path should be the v2 path, not v1
-      let utils_v2_canonical = utils_v2.canonicalize().unwrap();
+      let utils_v2_canonical = dunce::canonicalize(&utils_v2).unwrap();
       assert_eq!(
         utils_resolved.path, utils_v2_canonical,
         "follows override should redirect to my_utils (v2)"
@@ -1689,7 +1689,7 @@ return {{
       let utils_resolved = lib_resolved.inputs.get("utils").unwrap();
 
       // The utils path should be v2 (from lock file), not v1 (from init.lua)
-      let utils_v2_canonical = utils_v2.canonicalize().unwrap();
+      let utils_v2_canonical = dunce::canonicalize(&utils_v2).unwrap();
       assert_eq!(
         utils_resolved.path, utils_v2_canonical,
         "input lock file should pin utils to v2"
@@ -1795,7 +1795,7 @@ return {{
       assert!(lib_resolved.inputs.contains_key("utils"));
       let utils_resolved = lib_resolved.inputs.get("utils").unwrap();
 
-      let utils_v3_canonical = utils_v3.canonicalize().unwrap();
+      let utils_v3_canonical = dunce::canonicalize(&utils_v3).unwrap();
       assert_eq!(
         utils_resolved.path, utils_v3_canonical,
         "follows should override input lock file - expected v3"
@@ -1850,7 +1850,7 @@ return {{
       assert!(lib_resolved.inputs.contains_key("utils"));
       let utils_resolved = lib_resolved.inputs.get("utils").unwrap();
 
-      let utils_canonical = utils.canonicalize().unwrap();
+      let utils_canonical = dunce::canonicalize(&utils).unwrap();
       assert_eq!(
         utils_resolved.path, utils_canonical,
         "without lock file, should use floating declaration"

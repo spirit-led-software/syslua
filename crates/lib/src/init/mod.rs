@@ -78,7 +78,7 @@ pub fn init(options: &InitOptions) -> Result<InitResult, InitError> {
   })?;
 
   // Canonicalize for consistent paths
-  let config_dir = config_dir.canonicalize().map_err(|e| InitError::Canonicalize {
+  let config_dir = dunce::canonicalize(config_dir).map_err(|e| InitError::Canonicalize {
     path: options.config_path.clone(),
     source: e,
   })?;

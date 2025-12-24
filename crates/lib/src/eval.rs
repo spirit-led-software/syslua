@@ -763,7 +763,7 @@ mod tests {
     fs::create_dir(&lib_a_dir).unwrap();
 
     // Need to escape the path for Lua
-    let utils_path = utils_dir.canonicalize().unwrap();
+    let utils_path = dunce::canonicalize(&utils_dir).unwrap();
     let utils_path_str = utils_path.to_string_lossy().replace('\\', "/");
     fs::write(
       lib_a_dir.join("init.lua"),
