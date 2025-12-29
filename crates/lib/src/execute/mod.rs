@@ -63,7 +63,7 @@ pub async fn execute_builds(manifest: &Manifest, config: &ExecuteConfig) -> Resu
   // Get execution waves
   let waves = dag.build_waves()?;
 
-  info!(wave_count = waves.len(), "computed execution waves");
+  debug!(wave_count = waves.len(), "computed execution waves");
 
   // Track results
   let mut result = DagResult::default();
@@ -111,7 +111,7 @@ pub async fn execute_builds(manifest: &Manifest, config: &ExecuteConfig) -> Resu
       for (hash, build_result) in wave_results {
         match build_result {
           Ok(br) => {
-            info!(build = %hash.0, "build succeeded");
+            debug!(build = %hash.0, "build succeeded");
             result.realized.insert(hash, br);
           }
           Err(e) => {
@@ -172,7 +172,7 @@ pub async fn execute_manifest(manifest: &Manifest, config: &ExecuteConfig) -> Re
   // Get unified execution waves
   let waves = dag.execution_waves()?;
 
-  info!(wave_count = waves.len(), "computed execution waves");
+  debug!(wave_count = waves.len(), "computed execution waves");
 
   // Track results
   let mut result = DagResult::default();
@@ -248,7 +248,7 @@ pub async fn execute_manifest(manifest: &Manifest, config: &ExecuteConfig) -> Re
       for (hash, build_result) in build_results {
         match build_result {
           Ok(br) => {
-            info!(build = %hash.0, "build succeeded");
+            debug!(build = %hash.0, "build succeeded");
             result.realized.insert(hash, br);
           }
           Err(e) => {
@@ -280,7 +280,7 @@ pub async fn execute_manifest(manifest: &Manifest, config: &ExecuteConfig) -> Re
       for (hash, bind_result) in bind_results {
         match bind_result {
           Ok(br) => {
-            info!(bind = %hash.0, "bind succeeded");
+            debug!(bind = %hash.0, "bind succeeded");
             applied_binds_order.push(hash.clone());
             result.applied.insert(hash, br);
           }
@@ -506,7 +506,7 @@ async fn rollback_binds(
     if let Some(bind_def) = manifest.bindings.get(hash)
       && let Some(bind_result) = applied_results.get(hash)
     {
-      info!(bind = %hash.0, "destroying bind");
+      debug!(bind = %hash.0, "destroying bind during rollback");
       if let Err(e) = destroy_bind(hash, bind_def, bind_result, &resolver).await {
         // Log but continue - we want to try to rollback as much as possible
         error!(bind = %hash.0, error = %e, "failed to destroy bind during rollback");
@@ -514,7 +514,7 @@ async fn rollback_binds(
     }
   }
 
-  info!("rollback complete");
+  debug!("rollback complete");
 }
 
 /// Execute a wave of builds in parallel.

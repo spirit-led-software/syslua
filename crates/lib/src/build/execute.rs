@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::build::BuildDef;
 use crate::build::store::build_dir_path;
@@ -54,7 +54,7 @@ async fn write_build_complete_marker(store_path: &Path) -> Result<(), ExecuteErr
   let content = serde_json::to_string(&marker).expect("failed to serialize marker");
   fs::write(store_path.join(BUILD_COMPLETE_MARKER), format!("{}\n", content))
     .await
-    .map_err(ExecuteError::WriteMarker)
+    .map_err(|e| ExecuteError::WriteMarker { message: e.to_string() })
 }
 
 /// Read the build completion marker.
@@ -68,8 +68,10 @@ pub fn read_build_marker(store_path: &Path) -> Result<Option<BuildMarker>, Execu
     return Ok(None);
   }
 
-  let content = std::fs::read_to_string(&marker_path).map_err(ExecuteError::ReadMarker)?;
-  let marker: BuildMarker = serde_json::from_str(&content).map_err(ExecuteError::ParseMarker)?;
+  let content =
+    std::fs::read_to_string(&marker_path).map_err(|e| ExecuteError::ReadMarker { message: e.to_string() })?;
+  let marker: BuildMarker =
+    serde_json::from_str(&content).map_err(|e| ExecuteError::ParseMarker { message: e.to_string() })?;
   Ok(Some(marker))
 }
 
@@ -137,7 +139,7 @@ pub async fn realize_build(
   manifest: &Manifest,
   config: &ExecuteConfig,
 ) -> Result<BuildResult, ExecuteError> {
-  info!(
+  debug!(
     id = ?build_def.id,
     hash = %hash.0,
     "realizing build"
@@ -208,7 +210,7 @@ pub async fn realize_build(
   // Write completion marker
   write_build_complete_marker(&store_path).await?;
 
-  info!(
+  debug!(
     id = ?build_def.id,
     path = ?store_path,
     "build complete"
@@ -247,7 +249,7 @@ pub async fn realize_build_with_resolver(
   manifest: &Manifest,
   config: &ExecuteConfig,
 ) -> Result<BuildResult, ExecuteError> {
-  info!(
+  debug!(
     id = ?build_def.id,
     hash = %hash.0,
     "realizing build (with unified resolver)"
@@ -332,7 +334,7 @@ pub async fn realize_build_with_resolver(
   // Write completion marker
   write_build_complete_marker(&store_path).await?;
 
-  info!(
+  debug!(
     id = ?build_def.id,
     path = ?store_path,
     "build complete"

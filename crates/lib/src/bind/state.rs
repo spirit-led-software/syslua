@@ -29,7 +29,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, info};
+use tracing::{debug, warn};
 
 use crate::bind::store::bind_dir_path;
 use crate::util::hash::ObjectHash;
@@ -82,7 +82,7 @@ pub fn save_bind_state(hash: &ObjectHash, state: &BindState) -> Result<(), BindS
   let dir = bind_dir_path(hash);
   let path = dir.join(STATE_FILENAME);
 
-  info!(
+  debug!(
     hash = %hash.0,
     path = %path.display(),
     output_count = state.outputs.len(),
@@ -98,14 +98,14 @@ pub fn save_bind_state(hash: &ObjectHash, state: &BindState) -> Result<(), BindS
   fs::write(&temp_path, &content).map_err(BindStateError::Write)?;
   fs::rename(&temp_path, &path).map_err(BindStateError::Write)?;
 
-  info!(hash = %hash.0, "bind state saved successfully");
+  debug!(hash = %hash.0, "bind state saved successfully");
   Ok(())
 }
 
 pub fn load_bind_state(hash: &ObjectHash) -> Result<Option<BindState>, BindStateError> {
   let path = bind_state_path(hash);
 
-  info!(
+  debug!(
     hash = %hash.0,
     path = %path.display(),
     "loading bind state"
@@ -121,22 +121,22 @@ pub fn load_bind_state(hash: &ObjectHash) -> Result<Option<BindState>, BindState
 
   let content = match fs::read_to_string(&path) {
     Ok(content) => {
-      info!(hash = %hash.0, content_len = content.len(), "bind state file found");
+      debug!(hash = %hash.0, content_len = content.len(), "bind state file found");
       content
     }
     Err(e) if e.kind() == io::ErrorKind::NotFound => {
-      info!(hash = %hash.0, path = %path.display(), "bind state file not found");
+      debug!(hash = %hash.0, path = %path.display(), "bind state file not found");
       return Ok(None);
     }
     Err(e) => {
-      info!(hash = %hash.0, error = %e, "failed to read bind state file");
+      warn!(hash = %hash.0, error = %e, "failed to read bind state file");
       return Err(BindStateError::Read(e));
     }
   };
 
   let state: BindState = serde_json::from_str(&content).map_err(BindStateError::Parse)?;
   debug!(outputs = ?state.outputs, "loaded bind state outputs");
-  info!(
+  debug!(
     hash = %hash.0,
     output_count = state.outputs.len(),
     "bind state loaded successfully"
@@ -147,7 +147,7 @@ pub fn load_bind_state(hash: &ObjectHash) -> Result<Option<BindState>, BindState
 pub fn remove_bind_state(hash: &ObjectHash) -> Result<(), BindStateError> {
   let dir = bind_dir_path(hash);
 
-  info!(
+  debug!(
     hash = %hash.0,
     path = %dir.display(),
     "removing bind state directory"
@@ -155,15 +155,15 @@ pub fn remove_bind_state(hash: &ObjectHash) -> Result<(), BindStateError> {
 
   match fs::remove_dir_all(&dir) {
     Ok(()) => {
-      info!(hash = %hash.0, "bind state directory removed successfully");
+      debug!(hash = %hash.0, "bind state directory removed successfully");
       Ok(())
     }
     Err(e) if e.kind() == io::ErrorKind::NotFound => {
-      info!(hash = %hash.0, "bind state directory already gone");
+      debug!(hash = %hash.0, "bind state directory already gone");
       Ok(())
     }
     Err(e) => {
-      info!(hash = %hash.0, error = %e, "failed to remove bind state directory");
+      warn!(hash = %hash.0, error = %e, "failed to remove bind state directory");
       Err(BindStateError::Remove(e))
     }
   }

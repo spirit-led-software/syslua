@@ -9,7 +9,13 @@
 - Types: be explicit at public boundaries; prefer references (`&str`, slices) over owned types when clones are not required; keep manifests/DAG types consistent with [the architecture docs](./docs/architecture).
 - Prefer extending existing module/option systems to adding ad-hoc flags or environment variables.
 - For cross-platform behavior, rely on `syslua_lib::platform` abstractions instead of OS-specific APIs where possible.
-- Logging: use existing logging facilities and levels; keep messages actionable and avoid excessive default TRACE-level noise.
+- Logging: use `tracing` macros (`error!`, `warn!`, `info!`, `debug!`, `trace!`). Level guidelines:
+  - `error!`: Unrecoverable failures that stop execution
+  - `warn!`: Recoverable issues, degraded behavior, unexpected but handled conditions
+  - `info!`: User-facing milestones (command start/end, major phase transitions)
+  - `debug!`: Internal operations, per-item progress (builds, binds), state changes
+  - `trace!`: High-volume internals (DAG traversal, hash computations, loop iterations)
+  - Keep messages actionable; include relevant context via structured fields (e.g., `debug!(hash = %hash.0, "applying bind")`)
 - Tests: favor fast, deterministic unit tests per crate; for integration flows, mimic `sys apply/plan` behavior with targeted cases rather than broad end-to-end scripts.
 - There are currently no Cursor rules (`.cursor/rules/` or `.cursorrules`) or Copilot rules (`.github/copilot-instructions.md`); if they are added later, update this file to reference them.
 - Reference [Architecture Docs](./docs/architecture) for high-level design principles and module interactions.

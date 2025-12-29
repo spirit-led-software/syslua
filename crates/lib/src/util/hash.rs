@@ -13,6 +13,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tracing::trace;
 use walkdir::WalkDir;
 
 use crate::consts::OBJ_HASH_PREFIX_LEN;
@@ -65,24 +66,16 @@ impl std::fmt::Display for ContentHash {
 }
 
 /// Error during directory hashing.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
 pub enum DirHashError {
-  #[error("failed to walk directory: {0}")]
-  WalkDir(#[from] walkdir::Error),
+  #[error("failed to walk directory: {message}")]
+  WalkDir { message: String },
 
-  #[error("failed to read file {path}: {source}")]
-  ReadFile {
-    path: String,
-    #[source]
-    source: std::io::Error,
-  },
+  #[error("failed to read file {path}: {message}")]
+  ReadFile { path: String, message: String },
 
-  #[error("failed to read symlink {path}: {source}")]
-  ReadSymlink {
-    path: String,
-    #[source]
-    source: std::io::Error,
-  },
+  #[error("failed to read symlink {path}: {message}")]
+  ReadSymlink { path: String, message: String },
 }
 
 /// Compute a deterministic hash of a directory's contents.
@@ -111,6 +104,8 @@ pub enum DirHashError {
 pub fn hash_directory(path: &Path, exclude: &[&str]) -> Result<ContentHash, DirHashError> {
   let mut entries: Vec<(String, String)> = Vec::new();
 
+  trace!(path = %path.display(), excludes = ?exclude, "hashing directory");
+
   let walker = WalkDir::new(path).sort_by_file_name().into_iter().filter_entry(|e| {
     // Filter out excluded entries
     e.file_name()
@@ -120,7 +115,7 @@ pub fn hash_directory(path: &Path, exclude: &[&str]) -> Result<ContentHash, DirH
   });
 
   for entry in walker {
-    let entry = entry?;
+    let entry = entry.map_err(|e| DirHashError::WalkDir { message: e.to_string() })?;
     let entry_path = entry.path();
 
     // Get path relative to root
@@ -138,13 +133,15 @@ pub fn hash_directory(path: &Path, exclude: &[&str]) -> Result<ContentHash, DirH
     let file_type = entry.file_type();
     let entry_hash = if file_type.is_file() {
       let content_hash = hash_file(entry_path)?;
+      trace!(path = %rel_path, hash = %content_hash.0, "hashed file");
       format!("F:{}:{}", rel_path, content_hash.0)
     } else if file_type.is_dir() {
+      trace!(path = %rel_path, "recorded directory");
       format!("D:{}", rel_path)
     } else if file_type.is_symlink() {
       let target = fs::read_link(entry_path).map_err(|e| DirHashError::ReadSymlink {
         path: entry_path.display().to_string(),
-        source: e,
+        message: e.to_string(),
       })?;
       let target_hash = hash_bytes(target.to_string_lossy().as_bytes());
       format!("L:{}:{}", rel_path, target_hash.0)
@@ -166,7 +163,10 @@ pub fn hash_directory(path: &Path, exclude: &[&str]) -> Result<ContentHash, DirH
     hasher.update(b"\n");
   }
 
-  Ok(ContentHash(format!("{:x}", hasher.finalize())))
+  let result = ContentHash(format!("{:x}", hasher.finalize()));
+  trace!(path = %path.display(), hash = %result.0, "directory hash complete");
+
+  Ok(result)
 }
 
 /// Hash a file's contents.
@@ -175,7 +175,7 @@ pub fn hash_directory(path: &Path, exclude: &[&str]) -> Result<ContentHash, DirH
 pub fn hash_file(path: &Path) -> Result<ContentHash, DirHashError> {
   let mut file = fs::File::open(path).map_err(|e| DirHashError::ReadFile {
     path: path.display().to_string(),
-    source: e,
+    message: e.to_string(),
   })?;
 
   let mut hasher = Sha256::new();
@@ -184,7 +184,7 @@ pub fn hash_file(path: &Path) -> Result<ContentHash, DirHashError> {
   loop {
     let bytes_read = file.read(&mut buffer).map_err(|e| DirHashError::ReadFile {
       path: path.display().to_string(),
-      source: e,
+      message: e.to_string(),
     })?;
     if bytes_read == 0 {
       break;
