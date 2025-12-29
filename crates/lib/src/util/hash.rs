@@ -72,16 +72,10 @@ pub enum DirHashError {
   WalkDir { message: String },
 
   #[error("failed to read file {path}: {message}")]
-  ReadFile {
-    path: String,
-    message: String,
-  },
+  ReadFile { path: String, message: String },
 
   #[error("failed to read symlink {path}: {message}")]
-  ReadSymlink {
-    path: String,
-    message: String,
-  },
+  ReadSymlink { path: String, message: String },
 }
 
 /// Compute a deterministic hash of a directory's contents.

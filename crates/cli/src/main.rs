@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use cmd::{cmd_apply, cmd_destroy, cmd_diff, cmd_info, cmd_init, cmd_plan, cmd_status, cmd_update};
 use tracing::Level;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_subscriber::{Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Log verbosity level
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]

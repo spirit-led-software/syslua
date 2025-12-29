@@ -6,9 +6,9 @@
 use std::collections::{HashMap, HashSet};
 
 use petgraph::Direction;
-use tracing::trace;
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
+use tracing::trace;
 
 use crate::bind::{BindDef, BindInputsDef};
 use crate::build::BuildInputs;
@@ -187,7 +187,11 @@ impl ExecutionDag {
       for &idx in &ready {
         node_level.insert(idx, current_level);
         remaining.remove(&idx);
-        trace!(level = current_level, nodes_in_level = ready.len(), "computed wave level");
+        trace!(
+          level = current_level,
+          nodes_in_level = ready.len(),
+          "computed wave level"
+        );
 
         // Decrement in-degree of dependents
         for neighbor in self.graph.neighbors_directed(idx, Direction::Outgoing) {

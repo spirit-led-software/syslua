@@ -68,8 +68,10 @@ pub fn read_build_marker(store_path: &Path) -> Result<Option<BuildMarker>, Execu
     return Ok(None);
   }
 
-  let content = std::fs::read_to_string(&marker_path).map_err(|e| ExecuteError::ReadMarker { message: e.to_string() })?;
-  let marker: BuildMarker = serde_json::from_str(&content).map_err(|e| ExecuteError::ParseMarker { message: e.to_string() })?;
+  let content =
+    std::fs::read_to_string(&marker_path).map_err(|e| ExecuteError::ReadMarker { message: e.to_string() })?;
+  let marker: BuildMarker =
+    serde_json::from_str(&content).map_err(|e| ExecuteError::ParseMarker { message: e.to_string() })?;
   Ok(Some(marker))
 }
 
