@@ -2,7 +2,7 @@
 //!
 //! This crate provides the fundamental types used throughout SysLua:
 //! - `Build`: immutable build recipes that produce store content
-//! - `Bind`: describes what to do with derivation outputs
+//! - `Bind`: describes what to do with bind outputs
 //! - `Manifest`: the complete set of derivations and activations
 //! - `Snapshot`: rollback journal for restoring previous system state
 
