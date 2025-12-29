@@ -131,12 +131,7 @@ fn init_creates_config_files() {
   let env = TestEnv::empty();
   let init_dir = env.temp.path().join("myconfig");
 
-  env
-    .cmd()
-    .arg("init")
-    .arg(&init_dir)
-    .assert()
-    .success();
+  env.cmd().arg("init").arg(&init_dir).assert().success();
 
   assert!(init_dir.join("init.lua").exists());
   assert!(init_dir.join(".luarc.json").exists());
@@ -163,12 +158,7 @@ fn init_fails_if_config_exists() {
 fn plan_with_minimal_config() {
   let env = TestEnv::with_config(MINIMAL_CONFIG);
 
-  env
-    .cmd()
-    .arg("plan")
-    .arg(env.config())
-    .assert()
-    .success();
+  env.cmd().arg("plan").arg(env.config()).assert().success();
 }
 
 #[test]
@@ -306,22 +296,12 @@ fn info_shows_platform() {
 fn invalid_lua_syntax_fails() {
   let env = TestEnv::with_config("this is not valid lua {{{");
 
-  env
-    .cmd()
-    .arg("plan")
-    .arg(env.config())
-    .assert()
-    .failure();
+  env.cmd().arg("plan").arg(env.config()).assert().failure();
 }
 
 #[test]
 fn missing_setup_function_fails() {
   let env = TestEnv::with_config("return { inputs = {} }");
 
-  env
-    .cmd()
-    .arg("plan")
-    .arg(env.config())
-    .assert()
-    .failure();
+  env.cmd().arg("plan").arg(env.config()).assert().failure();
 }
