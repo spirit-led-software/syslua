@@ -8,7 +8,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::build::BuildDef;
 use crate::build::store::build_dir_path;
@@ -137,7 +137,7 @@ pub async fn realize_build(
   manifest: &Manifest,
   config: &ExecuteConfig,
 ) -> Result<BuildResult, ExecuteError> {
-  info!(
+  debug!(
     id = ?build_def.id,
     hash = %hash.0,
     "realizing build"
@@ -208,7 +208,7 @@ pub async fn realize_build(
   // Write completion marker
   write_build_complete_marker(&store_path).await?;
 
-  info!(
+  debug!(
     id = ?build_def.id,
     path = ?store_path,
     "build complete"
@@ -247,7 +247,7 @@ pub async fn realize_build_with_resolver(
   manifest: &Manifest,
   config: &ExecuteConfig,
 ) -> Result<BuildResult, ExecuteError> {
-  info!(
+  debug!(
     id = ?build_def.id,
     hash = %hash.0,
     "realizing build (with unified resolver)"
@@ -332,7 +332,7 @@ pub async fn realize_build_with_resolver(
   // Write completion marker
   write_build_complete_marker(&store_path).await?;
 
-  info!(
+  debug!(
     id = ?build_def.id,
     path = ?store_path,
     "build complete"

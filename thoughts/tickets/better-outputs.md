@@ -1,5 +1,5 @@
 ---
-status: planned
+status: implemented
 research: thoughts/research/2025-12-29_better-cli-outputs.md
 plan: thoughts/plans/better-cli-outputs.md
 ---

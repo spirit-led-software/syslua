@@ -6,7 +6,45 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use cmd::{cmd_apply, cmd_destroy, cmd_diff, cmd_info, cmd_init, cmd_plan, cmd_status, cmd_update};
 use tracing::Level;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+
+/// Log verbosity level
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum LogLevel {
+  /// Show only errors
+  Error,
+  /// Show warnings and errors
+  Warn,
+  /// Show informational messages (default)
+  #[default]
+  Info,
+  /// Show debug messages
+  Debug,
+  /// Show all messages including trace
+  Trace,
+}
+
+impl From<LogLevel> for Level {
+  fn from(level: LogLevel) -> Self {
+    match level {
+      LogLevel::Error => Level::ERROR,
+      LogLevel::Warn => Level::WARN,
+      LogLevel::Info => Level::INFO,
+      LogLevel::Debug => Level::DEBUG,
+      LogLevel::Trace => Level::TRACE,
+    }
+  }
+}
+
+/// Log output format
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
+pub enum LogFormat {
+  /// Human-readable format (default)
+  #[default]
+  Pretty,
+  /// JSON format for structured logging
+  Json,
+}
 
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 pub enum ColorChoice {
@@ -19,9 +57,13 @@ pub enum ColorChoice {
 #[derive(Parser)]
 #[command(name = "syslua", author, version, about, long_about = None)]
 struct Cli {
-  /// Enable debug logging (DEBUG level instead of INFO)
-  #[arg(short = 'd', long, global = true)]
-  debug: bool,
+  /// Log verbosity level
+  #[arg(short = 'l', long, value_enum, default_value = "info", global = true)]
+  log_level: LogLevel,
+
+  /// Log output format
+  #[arg(long, value_enum, default_value = "pretty", global = true)]
+  log_format: LogFormat,
 
   /// Control colored output
   #[arg(long, value_enum, default_value = "auto", global = true)]
@@ -117,14 +159,42 @@ fn main() -> ExitCode {
     ColorChoice::Auto => {}
   }
 
-  let level = if cli.debug { Level::DEBUG } else { Level::INFO };
+  let level: Level = cli.log_level.into();
+  let show_timestamps = matches!(cli.log_level, LogLevel::Debug | LogLevel::Trace);
 
-  let subscriber = FmtSubscriber::builder().with_max_level(level).with_target(false);
-
-  if cli.debug {
-    subscriber.init();
-  } else {
-    subscriber.without_time().init();
+  match cli.log_format {
+    LogFormat::Pretty => {
+      if show_timestamps {
+        tracing_subscriber::registry()
+          .with(
+            fmt::layer()
+              .with_target(true)
+              .with_filter(tracing_subscriber::filter::LevelFilter::from_level(level)),
+          )
+          .init();
+      } else {
+        tracing_subscriber::registry()
+          .with(
+            fmt::layer()
+              .without_time()
+              .with_target(false)
+              .with_filter(tracing_subscriber::filter::LevelFilter::from_level(level)),
+          )
+          .init();
+      }
+    }
+    LogFormat::Json => {
+      tracing_subscriber::registry()
+        .with(
+          fmt::layer()
+            .json()
+            .with_file(true)
+            .with_line_number(true)
+            .with_target(true)
+            .with_filter(tracing_subscriber::filter::LevelFilter::from_level(level)),
+        )
+        .init();
+    }
   }
 
   let result = match cli.command {

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use tempfile::TempDir;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::action::{Action, execute_action};
 use crate::bind::BindDef;
@@ -35,7 +35,7 @@ pub async fn apply_bind<R: Resolver>(
   bind_def: &BindDef,
   resolver: &R,
 ) -> Result<BindResult, ExecuteError> {
-  info!(hash = %hash.0, "applying bind");
+  debug!(hash = %hash.0, "applying bind");
 
   // Create a temporary working directory for the bind's $${out}
   let temp_dir = TempDir::new()?;
@@ -52,7 +52,7 @@ pub async fn apply_bind<R: Resolver>(
   let (action_results, outputs) =
     execute_bind_actions(&bind_def.create_actions, bind_resolver, bind_def, out_dir).await?;
 
-  info!(hash = %hash.0, "bind applied");
+  debug!(hash = %hash.0, "bind applied");
 
   // Keep the temp dir alive until the result is processed
   // In a real implementation, we might want to persist state somewhere
@@ -87,7 +87,7 @@ pub async fn destroy_bind<R: Resolver>(
 ) -> Result<(), ExecuteError> {
   let destroy_actions = &bind_def.destroy_actions;
 
-  info!(hash = %hash.0, "destroying bind");
+  debug!(hash = %hash.0, "destroying bind");
 
   // Create a temporary directory for destroy actions
   let temp_dir = TempDir::new()?;
@@ -105,7 +105,7 @@ pub async fn destroy_bind<R: Resolver>(
   // Execute destroy actions
   let _ = execute_bind_actions_raw(destroy_actions, bind_resolver, out_dir).await?;
 
-  info!(hash = %hash.0, "bind destroyed");
+  debug!(hash = %hash.0, "bind destroyed");
 
   Ok(())
 }
@@ -133,7 +133,7 @@ pub async fn update_bind<R: Resolver>(
   old_bind_result: &BindResult,
   resolver: &R,
 ) -> Result<BindResult, ExecuteError> {
-  info!(old_hash = %old_hash.0, new_hash = %new_hash.0, "updating bind");
+  debug!(old_hash = %old_hash.0, new_hash = %new_hash.0, "updating bind");
 
   // Create a temporary working directory for the bind's $${out}
   let temp_dir = TempDir::new()?;
@@ -160,7 +160,7 @@ pub async fn update_bind<R: Resolver>(
   let (action_results, outputs) =
     execute_bind_update_actions(update_actions, bind_resolver, new_bind_def, out_dir).await?;
 
-  info!(old_hash = %old_hash.0, new_hash = %new_hash.0, "bind updated");
+  debug!(old_hash = %old_hash.0, new_hash = %new_hash.0, "bind updated");
 
   // Keep the temp dir alive
   std::mem::forget(temp_dir);

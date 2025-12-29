@@ -196,13 +196,13 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
   // Capture previous snapshot ID for potential rollback
   let previous_snapshot_id = snapshot_store.current_id()?;
 
-  info!(has_current = current_snapshot.is_some(), "loaded current state");
+  debug!(has_current = current_snapshot.is_some(), "loaded current state");
 
   // 2. Evaluate config to produce desired manifest
-  info!("evaluating config");
+  debug!("evaluating config");
   let desired_manifest = evaluate_config(config_path)?;
 
-  info!(
+  debug!(
     builds = desired_manifest.builds.len(),
     binds = desired_manifest.bindings.len(),
     "config evaluated"
@@ -212,7 +212,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
   let store_path = store_dir();
   let diff = compute_diff(&desired_manifest, current_manifest, &store_path);
 
-  info!(
+  debug!(
     builds_to_realize = diff.builds_to_realize.len(),
     builds_cached = diff.builds_cached.len(),
     binds_to_apply = diff.binds_to_apply.len(),
@@ -247,7 +247,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
     snapshot_store.save_and_set_current(&snapshot)?;
 
     if binds_repaired > 0 {
-      info!(binds_repaired = binds_repaired, "repaired drifted binds");
+      debug!(binds_repaired = binds_repaired, "repaired drifted binds");
     }
 
     return Ok(ApplyResult {
@@ -303,7 +303,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
   // Filter to only include builds that need realization and binds that need applying
   let execution_manifest = build_execution_manifest(&desired_manifest, &diff);
 
-  info!(
+  debug!(
     builds = execution_manifest.builds.len(),
     binds = execution_manifest.bindings.len(),
     "executing manifest"
@@ -381,7 +381,7 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
   );
 
   snapshot_store.save_and_set_current(&snapshot)?;
-  info!(snapshot_id = %snapshot.id, binds_repaired = binds_repaired, "snapshot saved");
+  debug!(snapshot_id = %snapshot.id, binds_repaired = binds_repaired, "snapshot saved");
 
   Ok(ApplyResult {
     snapshot,
@@ -417,7 +417,7 @@ pub async fn check_unchanged_binds(
     return Ok(vec![]);
   }
 
-  info!(count = hashes.len(), "checking unchanged binds for drift");
+  debug!(count = hashes.len(), "checking unchanged binds for drift");
 
   let mut drift_results = Vec::new();
   let empty_builds: HashMap<ObjectHash, BuildResult> = HashMap::new();
@@ -461,7 +461,7 @@ pub async fn check_unchanged_binds(
     }
   }
 
-  info!(
+  debug!(
     drifted = drift_results.iter().filter(|r| r.result.drifted).count(),
     "drift check complete"
   );
@@ -483,7 +483,7 @@ async fn repair_drifted_binds(
     return Ok(0);
   }
 
-  info!(count = drifted.len(), "repairing drifted binds");
+  debug!(count = drifted.len(), "repairing drifted binds");
 
   let semaphore = Arc::new(Semaphore::new(config.parallelism));
   let mut join_set: JoinSet<Result<(ObjectHash, BindResult), ApplyError>> = JoinSet::new();
@@ -513,7 +513,7 @@ async fn repair_drifted_binds(
       let bind_state = BindState::new(result.outputs.clone());
       save_bind_state(&hash, &bind_state).map_err(ApplyError::BindState)?;
 
-      info!(hash = %hash.0, "bind repaired");
+      debug!(hash = %hash.0, "bind repaired");
       Ok((hash, result))
     });
   }
@@ -538,7 +538,7 @@ async fn repair_drifted_binds(
     }
   }
 
-  info!(repaired = repaired, "repair complete");
+  debug!(repaired = repaired, "repair complete");
   Ok(repaired)
 }
 
@@ -582,7 +582,7 @@ pub async fn destroy(options: &DestroyOptions) -> Result<DestroyResult, ApplyErr
   let bind_count = manifest.bindings.len();
   let build_count = manifest.builds.len();
 
-  info!(
+  debug!(
     binds = bind_count,
     builds = build_count,
     snapshot_id = %snapshot.id,
@@ -591,7 +591,7 @@ pub async fn destroy(options: &DestroyOptions) -> Result<DestroyResult, ApplyErr
 
   // Early exit if no binds to destroy
   if bind_count == 0 {
-    info!("no binds to destroy");
+    debug!("no binds to destroy");
     snapshot_store.clear_current()?;
     return Ok(DestroyResult {
       binds_destroyed: 0,
@@ -704,7 +704,7 @@ async fn destroy_removed_binds(
     return Ok(Vec::new());
   }
 
-  info!(count = hashes.len(), "destroying removed binds");
+  debug!(count = hashes.len(), "destroying removed binds");
   debug!(bind_hashes = ?hashes.iter().map(|h| &h.0).collect::<Vec<_>>(), "binds to destroy");
 
   let mut destroyed = Vec::new();
@@ -771,7 +771,7 @@ async fn destroy_removed_binds(
     };
 
     // Execute destroy
-    info!(bind = %hash.0, destroy_actions = bind_def.destroy_actions.len(), "destroying bind");
+    debug!(bind = %hash.0, destroy_actions = bind_def.destroy_actions.len(), "destroying bind");
     if let Err(e) = destroy_bind(hash, bind_def, &bind_result, &resolver).await {
       error!(bind = %hash.0, error = %e, "failed to destroy bind");
       return Err(DestroyPhaseError {
@@ -783,10 +783,10 @@ async fn destroy_removed_binds(
 
     // Track successful destruction (state file cleanup is deferred)
     destroyed.push(hash.clone());
-    info!(bind = %hash.0, "bind destroyed successfully");
+    debug!(bind = %hash.0, "bind destroyed successfully");
   }
 
-  info!(count = destroyed.len(), "destroy phase complete");
+  debug!(count = destroyed.len(), "destroy phase complete");
   Ok(destroyed)
 }
 
@@ -830,7 +830,7 @@ async fn update_modified_binds(
     return Ok(Vec::new());
   }
 
-  info!(count = updates.len(), "updating modified binds");
+  debug!(count = updates.len(), "updating modified binds");
 
   let mut updated = Vec::new();
 
@@ -892,7 +892,7 @@ async fn update_modified_binds(
     };
 
     // Execute update
-    info!(old_hash = %old_hash.0, new_hash = %new_hash.0, "updating bind");
+    debug!(old_hash = %old_hash.0, new_hash = %new_hash.0, "updating bind");
     let update_result = match update_bind(old_hash, new_hash, new_bind_def, &old_bind_result, &resolver).await {
       Ok(result) => result,
       Err(e) => {
@@ -918,7 +918,7 @@ async fn update_modified_binds(
     debug!(old_hash = %old_hash.0, new_hash = %new_hash.0, "bind updated");
   }
 
-  info!(count = updated.len(), "update phase complete");
+  debug!(count = updated.len(), "update phase complete");
   Ok(updated)
 }
 
@@ -997,7 +997,7 @@ async fn restore_destroyed_binds(
     return Ok(());
   }
 
-  info!(count = destroyed_hashes.len(), "restoring destroyed binds");
+  debug!(count = destroyed_hashes.len(), "restoring destroyed binds");
 
   let destroyed_set: HashSet<_> = destroyed_hashes.iter().collect();
 
@@ -1067,7 +1067,7 @@ async fn restore_destroyed_binds(
     while let Some(join_result) = join_set.join_next().await {
       match join_result {
         Ok(Ok((hash, result))) => {
-          info!(bind = %hash.0, "bind restored");
+          debug!(bind = %hash.0, "bind restored");
           completed_binds.insert(hash, result);
         }
         Ok(Err(e)) => {
@@ -1085,7 +1085,7 @@ async fn restore_destroyed_binds(
     }
   }
 
-  info!("restore complete");
+  debug!("restore complete");
   Ok(())
 }
 

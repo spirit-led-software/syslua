@@ -6,6 +6,7 @@
 use std::collections::{HashMap, HashSet};
 
 use petgraph::Direction;
+use tracing::trace;
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
 
@@ -66,12 +67,14 @@ impl ExecutionDag {
     for hash in manifest.builds.keys() {
       let idx = graph.add_node(DagNode::Build(hash.clone()));
       build_nodes.insert(hash.clone(), idx);
+      trace!(hash = %hash.0, "added build node to DAG");
     }
 
     // Create nodes for all binds (they can be dependencies)
     for hash in manifest.bindings.keys() {
       let idx = graph.add_node(DagNode::Bind(hash.clone()));
       bind_nodes.insert(hash.clone(), idx);
+      trace!(hash = %hash.0, "added bind node to DAG");
     }
 
     // Second pass: add edges for build dependencies
@@ -85,6 +88,7 @@ impl ExecutionDag {
           if let Some(&dep_idx) = build_nodes.get(&dep_hash) {
             // Edge from dependency to dependent
             graph.add_edge(dep_idx, dependent_idx, ());
+            trace!(from = %dep_hash.0, to = %hash.0, "added build dependency edge");
           }
           // If dependency not found, it might be external - ignore for now
         }
@@ -101,11 +105,13 @@ impl ExecutionDag {
             DagNode::Build(dep_hash) => {
               if let Some(&dep_idx) = build_nodes.get(&dep_hash) {
                 graph.add_edge(dep_idx, dependent_idx, ());
+                trace!(from = %dep_hash.0, to = %hash.0, kind = "build->bind", "added dependency edge");
               }
             }
             DagNode::Bind(dep_hash) => {
               if let Some(&dep_idx) = bind_nodes.get(&dep_hash) {
                 graph.add_edge(dep_idx, dependent_idx, ());
+                trace!(from = %dep_hash.0, to = %hash.0, kind = "bind->bind", "added dependency edge");
               }
             }
           }
@@ -181,6 +187,7 @@ impl ExecutionDag {
       for &idx in &ready {
         node_level.insert(idx, current_level);
         remaining.remove(&idx);
+        trace!(level = current_level, nodes_in_level = ready.len(), "computed wave level");
 
         // Decrement in-degree of dependents
         for neighbor in self.graph.neighbors_directed(idx, Direction::Outgoing) {
@@ -205,6 +212,8 @@ impl ExecutionDag {
 
     // Remove empty waves (can happen if a level only has binds)
     waves.retain(|w| !w.is_empty());
+
+    trace!(total_waves = waves.len(), "computed build waves");
 
     Ok(waves)
   }
@@ -394,6 +403,8 @@ impl ExecutionDag {
 
     // Remove empty waves (shouldn't happen, but be safe)
     waves.retain(|w| !w.is_empty());
+
+    trace!(total_waves = waves.len(), "computed execution waves");
 
     Ok(waves)
   }

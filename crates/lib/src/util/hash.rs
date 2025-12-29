@@ -13,6 +13,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tracing::trace;
 use walkdir::WalkDir;
 
 use crate::consts::OBJ_HASH_PREFIX_LEN;
@@ -109,6 +110,8 @@ pub enum DirHashError {
 pub fn hash_directory(path: &Path, exclude: &[&str]) -> Result<ContentHash, DirHashError> {
   let mut entries: Vec<(String, String)> = Vec::new();
 
+  trace!(path = %path.display(), excludes = ?exclude, "hashing directory");
+
   let walker = WalkDir::new(path).sort_by_file_name().into_iter().filter_entry(|e| {
     // Filter out excluded entries
     e.file_name()
@@ -136,8 +139,10 @@ pub fn hash_directory(path: &Path, exclude: &[&str]) -> Result<ContentHash, DirH
     let file_type = entry.file_type();
     let entry_hash = if file_type.is_file() {
       let content_hash = hash_file(entry_path)?;
+      trace!(path = %rel_path, hash = %content_hash.0, "hashed file");
       format!("F:{}:{}", rel_path, content_hash.0)
     } else if file_type.is_dir() {
+      trace!(path = %rel_path, "recorded directory");
       format!("D:{}", rel_path)
     } else if file_type.is_symlink() {
       let target = fs::read_link(entry_path).map_err(|e| DirHashError::ReadSymlink {
@@ -164,7 +169,10 @@ pub fn hash_directory(path: &Path, exclude: &[&str]) -> Result<ContentHash, DirH
     hasher.update(b"\n");
   }
 
-  Ok(ContentHash(format!("{:x}", hasher.finalize())))
+  let result = ContentHash(format!("{:x}", hasher.finalize()));
+  trace!(path = %path.display(), hash = %result.0, "directory hash complete");
+
+  Ok(result)
 }
 
 /// Hash a file's contents.
