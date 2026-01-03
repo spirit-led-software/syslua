@@ -2,7 +2,7 @@
 type: feature
 priority: medium
 created: 2025-12-31T05:30:00Z
-status: implemented
+status: reviewed
 tags: [cli, snapshot, management, ux]
 keywords: [snapshot, SnapshotStore, SnapshotIndex, SnapshotMetadata, delete, list, tag, humantime, clap, subcommand]
 patterns: [CLI subcommand structure, snapshot storage, index manipulation, time-based filtering]
