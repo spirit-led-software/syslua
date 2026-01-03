@@ -5,12 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-01-03
+
+### Features
+
+- `sys gc` and `sys snapshot` subcommands (#17) by @ian-pascoe in [#17](https://github.com/spirit-led-software/syslua/pull/17)
+
+### Miscellaneous
+
+- Remove old docs by @ian-pascoe
+- Doc updates (#16) by @ian-pascoe in [#16](https://github.com/spirit-led-software/syslua/pull/16)
+
+
+
+**Full Changelog**: https://github.com/spirit-led-software/syslua/compare/v0.5.0...v0.6.0
 ## [0.5.0] - 2025-12-29
 
 ### Features
 
 - Sys status and diff; better outputs and logging (#14) by @ian-pascoe in [#14](https://github.com/spirit-led-software/syslua/pull/14)
 - Bind check callback (#12) by @ian-pascoe in [#12](https://github.com/spirit-led-software/syslua/pull/12)
+
+### Miscellaneous
+
+- Release v0.5.0 (#15) by @syslua-bot[bot] in [#15](https://github.com/spirit-led-software/syslua/pull/15)
 
 ### Refactoring
 
