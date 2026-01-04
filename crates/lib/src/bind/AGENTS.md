@@ -1,5 +1,7 @@
 # Agent Guide: syslua-lib :: bind
 
+**Generated:** 2026-01-04 | **Commit:** c3a22f5
+
 ## OVERVIEW
 Handles system side effects (symlinks, services, files) through reversible bind definitions.
 

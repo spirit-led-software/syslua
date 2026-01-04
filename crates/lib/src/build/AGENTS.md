@@ -1,6 +1,6 @@
 # Module: syslua_lib::build
 
-**Generated:** 2026-01-04 | **Scope:** Build definitions and realization
+**Generated:** 2026-01-04 | **Commit:** c3a22f5 | **Scope:** Build definitions and realization
 
 ## OVERVIEW
 Immutable, content-addressed artifacts produced by executing a sequence of actions.

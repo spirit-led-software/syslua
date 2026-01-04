@@ -1,6 +1,6 @@
 # Platform Abstraction
 
-**Generated:** 2026-01-04
+**Generated:** 2026-01-04 | **Commit:** c3a22f5
 
 ## OVERVIEW
 Cross-platform abstractions for OS-specific operations, treating Windows as a first-class citizen.

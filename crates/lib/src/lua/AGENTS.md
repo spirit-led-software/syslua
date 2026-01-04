@@ -1,6 +1,6 @@
 # Agent Guidelines for syslua-lib/lua
 
-**Generated:** 2026-01-04 | **Commit:** bc66463 | **Branch:** main
+**Generated:** 2026-01-04 | **Commit:** c3a22f5 | **Branch:** main
 
 ## OVERVIEW
 Lua runtime and API for configuration evaluation using mlua (Lua 5.4 vendored).
