@@ -23,7 +23,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-walkdir = "2"
+walkdir = "2.5"
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1.1", features = ["process", "fs"] }
