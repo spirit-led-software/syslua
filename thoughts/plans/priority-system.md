@@ -121,6 +121,7 @@ The system is a **pure Lua-level utility** for merging tables with precedence - 
 
 **File**: `crates/lib/src/build/lua.rs`
 **Changes**: Modify `sys.build{}` registration to:
+
 1. Parse `replace` field from Lua table
 2. Check for existing entry with same `id`
 3. If found and `replace = false`: error with helpful message
@@ -142,7 +143,7 @@ if let Some(ref id) = new_def.id {
     let existing = manifest.builds.iter()
         .find(|(_, def)| def.id.as_ref() == Some(id))
         .map(|(h, _)| h.clone());
-    
+
     if let Some(old_hash) = existing {
         if !replace {
             return Err(LuaError::external(format!(

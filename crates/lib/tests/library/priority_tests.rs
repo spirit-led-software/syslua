@@ -271,3 +271,107 @@ fn conflict_error_includes_source_locations() -> LuaResult<()> {
 
   Ok(())
 }
+
+#[test]
+fn deep_merge_preserves_nested_keys() -> LuaResult<()> {
+  let (lua, _) = create_test_runtime()?;
+
+  lua
+    .load(
+      r#"
+        local priority = require('syslua.priority')
+        local base = { server = { port = 8080, host = 'localhost' } }
+        local override = { server = { port = 9090 } }
+        local result = priority.merge(base, override)
+        assert(result.server.port == 9090, 'port should be overridden')
+        assert(result.server.host == 'localhost', 'host should be preserved')
+      "#,
+    )
+    .exec()?;
+
+  Ok(())
+}
+
+#[test]
+fn deep_merge_priority_at_nested_level() -> LuaResult<()> {
+  let (lua, _) = create_test_runtime()?;
+
+  lua
+    .load(
+      r#"
+        local priority = require('syslua.priority')
+        local base = { server = { port = priority.default(8080) } }
+        local override = { server = { port = priority.force(443) } }
+        local result = priority.merge(base, override)
+        assert(result.server.port == 443, 'force should win at nested level')
+      "#,
+    )
+    .exec()?;
+
+  Ok(())
+}
+
+#[test]
+fn deep_merge_conflict_shows_full_path() -> LuaResult<()> {
+  let (lua, _) = create_test_runtime()?;
+
+  let result = lua
+    .load(
+      r#"
+        local priority = require('syslua.priority')
+        local base = { server = { ssl = { enabled = priority.default(true) } } }
+        local override = { server = { ssl = { enabled = priority.default(false) } } }
+        priority.merge(base, override)
+      "#,
+    )
+    .exec();
+
+  assert!(result.is_err());
+  let err = result.unwrap_err().to_string();
+  assert!(
+    err.contains("server.ssl.enabled"),
+    "error should show full key path: {}",
+    err
+  );
+
+  Ok(())
+}
+
+#[test]
+fn deep_merge_mergeable_at_nested_level() -> LuaResult<()> {
+  let (lua, _) = create_test_runtime()?;
+
+  lua
+    .load(
+      r#"
+        local priority = require('syslua.priority')
+        local base = { server = { paths = priority.mergeable({ separator = ':' }) } }
+        local merged = priority.merge(base, { server = { paths = priority.before('/opt') } })
+        merged = priority.merge(merged, { server = { paths = priority.after('/usr') } })
+        assert(merged.server.paths == '/opt:/usr', 'nested mergeable: ' .. tostring(merged.server.paths))
+      "#,
+    )
+    .exec()?;
+
+  Ok(())
+}
+
+#[test]
+fn deep_merge_arrays_are_atomic() -> LuaResult<()> {
+  let (lua, _) = create_test_runtime()?;
+
+  lua
+    .load(
+      r#"
+        local priority = require('syslua.priority')
+        local base = { packages = { 'vim', 'emacs' } }
+        local override = { packages = { 'nano' } }
+        local result = priority.merge(base, override)
+        assert(#result.packages == 1, 'array should be replaced, not merged')
+        assert(result.packages[1] == 'nano', 'should have nano')
+      "#,
+    )
+    .exec()?;
+
+  Ok(())
+}

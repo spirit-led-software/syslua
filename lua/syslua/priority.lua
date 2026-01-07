@@ -3,9 +3,9 @@
 ---@field __priority number
 ---@field __source {file: string, line: number}
 
----@class MergeableConfig
----@field __mergeable boolean
----@field separator? string
+---@class MergeableValue
+---@field __config {separator?: string}
+---@field __entries table[]
 
 ---@class PriorityModule
 ---@field PRIORITIES {FORCE: number, BEFORE: number, DEFAULT: number, AFTER: number}
@@ -14,7 +14,7 @@
 ---@field default fun(value: any): PriorityValue
 ---@field after fun(value: any): PriorityValue
 ---@field order fun(priority: number, value: any): PriorityValue
----@field mergeable fun(opts?: {separator?: string}): MergeableConfig
+---@field mergeable fun(opts?: {separator?: string}): MergeableValue
 ---@field merge fun(base: table, override: table): table
 ---@field wrap fun(value: any, priority: number, source?: {file: string, line: number}): PriorityValue
 ---@field unwrap fun(value: any): any
@@ -35,10 +35,12 @@ local PriorityMT = {
 
 local MergeableMT = {
   __type = 'Mergeable',
-}
-
-local AccumulatedMT = {
-  __type = 'Accumulated',
+  __index = function(self, key)
+    if key == 'separator' then
+      return rawget(self, '__config').separator
+    end
+    return rawget(self, key)
+  end,
 }
 
 local MergedTableMT
@@ -47,7 +49,7 @@ MergedTableMT = {
   __index = function(self, key)
     local raw = rawget(self, '__raw')
     local val = raw[key]
-    if val ~= nil and type(val) == 'table' and getmetatable(val) == AccumulatedMT then
+    if M.is_mergeable(val) and #val.__entries > 0 then
       return M._merge_values(val.__entries, val.__config)
     end
     return val
@@ -59,7 +61,7 @@ MergedTableMT = {
     local raw = rawget(self, '__raw')
     return function(t, k)
       local nk, nv = next(raw, k)
-      if nv ~= nil and type(nv) == 'table' and getmetatable(nv) == AccumulatedMT then
+      if M.is_mergeable(nv) and #nv.__entries > 0 then
         return nk, M._merge_values(nv.__entries, nv.__config)
       end
       return nk, nv
@@ -101,7 +103,7 @@ function M.wrap(value, priority, source)
 end
 
 function M.is_priority(value)
-  return type(value) == 'table' and getmetatable(value) and getmetatable(value).__type == 'PriorityValue'
+  return type(value) == 'table' and getmetatable(value) == PriorityMT
 end
 
 function M.unwrap(value)
@@ -144,35 +146,13 @@ end
 function M.mergeable(opts)
   opts = opts or {}
   return setmetatable({
-    __mergeable = true,
-    separator = opts.separator,
+    __config = { separator = opts.separator },
+    __entries = {},
   }, MergeableMT)
 end
 
 function M.is_mergeable(value)
-  return type(value) == 'table' and getmetatable(value) and getmetatable(value).__type == 'Mergeable'
-end
-
-function M._is_accumulated(value)
-  return type(value) == 'table' and getmetatable(value) and getmetatable(value).__type == 'Accumulated'
-end
-
-function M._make_accumulated(entries, config)
-  return setmetatable({
-    __entries = entries,
-    __config = config,
-  }, AccumulatedMT)
-end
-
-function M._make_merged_table(raw)
-  return setmetatable({ __raw = raw }, MergedTableMT)
-end
-
-function M._unwrap_merged_table(t)
-  if type(t) == 'table' and getmetatable(t) == MergedTableMT then
-    return rawget(t, '__raw')
-  end
-  return t
+  return type(value) == 'table' and getmetatable(value) == MergeableMT
 end
 
 function M._values_equal(a, b)
@@ -264,16 +244,31 @@ end
 
 function M._resolve_singular(key, entries)
   table.sort(entries, function(a, b)
-    return a.priority < b.priority
+    if a.priority ~= b.priority then
+      return a.priority < b.priority
+    end
+    if a.explicit and not b.explicit then
+      return true
+    end
+    if b.explicit and not a.explicit then
+      return false
+    end
+    if a.source.file == 'override' and b.source.file ~= 'override' then
+      return true
+    end
+    if b.source.file == 'override' and a.source.file ~= 'override' then
+      return false
+    end
+    return false
   end)
 
   local winner = entries[1]
   for i = 2, #entries do
-    if entries[i].priority == winner.priority then
+    if entries[i].priority == winner.priority and entries[i].explicit and winner.explicit then
       if not M._values_equal(entries[i].value, winner.value) then
         M._raise_conflict(key, winner, entries[i])
       end
-    else
+    elseif entries[i].priority ~= winner.priority then
       break
     end
   end
@@ -307,7 +302,30 @@ function M._merge_values(entries, config)
   end
 end
 
-function M.merge(base, override)
+function M._unwrap_merged_table(t)
+  if type(t) == 'table' and getmetatable(t) == MergedTableMT then
+    return rawget(t, '__raw')
+  end
+  return t
+end
+
+function M._is_plain_table(t)
+  if type(t) ~= 'table' or getmetatable(t) then
+    return false
+  end
+  local n = 0
+  for k in pairs(t) do
+    if type(k) ~= 'number' or k < 1 or k ~= math.floor(k) then
+      return true
+    end
+    n = n + 1
+  end
+  return n ~= #t
+end
+
+function M.merge(base, override, _path)
+  _path = _path or ''
+  
   if base == nil then
     return override
   end
@@ -319,68 +337,90 @@ function M.merge(base, override)
   override = M._unwrap_merged_table(override)
 
   local result = {}
-  local merge_configs = {}
-  local accumulated = {}
+  local mergeables = {}
   local all_values = {}
+  local nested = {}
 
-  for k, v in pairs(base) do
-    if M.is_mergeable(v) then
-      merge_configs[k] = v
-    elseif M._is_accumulated(v) then
-      merge_configs[k] = v.__config
-      accumulated[k] = {}
-      for _, entry in ipairs(v.__entries) do
-        table.insert(accumulated[k], entry)
-      end
-    end
+  local function key_path(k)
+    return _path == '' and tostring(k) or (_path .. '.' .. tostring(k))
   end
 
   for k, v in pairs(base) do
-    if not M.is_mergeable(v) and not M._is_accumulated(v) then
+    local unwrapped_v = M._unwrap_merged_table(v)
+    if M.is_mergeable(v) then
+      mergeables[k] = setmetatable({
+        __config = v.__config,
+        __entries = {},
+      }, MergeableMT)
+      for _, entry in ipairs(v.__entries) do
+        table.insert(mergeables[k].__entries, entry)
+      end
+    elseif M._is_plain_table(unwrapped_v) or (v ~= unwrapped_v) then
+      nested[k] = { base = unwrapped_v }
+    else
       all_values[k] = all_values[k] or {}
       table.insert(all_values[k], {
         value = M.unwrap(v),
         priority = M.get_priority(v),
         source = M.is_priority(v) and v.__source or { file = 'base', line = 0 },
+        explicit = M.is_priority(v),
       })
     end
   end
 
   for k, v in pairs(override) do
     if M.is_mergeable(v) then
-      merge_configs[k] = v
-    elseif M._is_accumulated(v) then
-      merge_configs[k] = v.__config
-      accumulated[k] = accumulated[k] or {}
-      for _, entry in ipairs(v.__entries) do
-        table.insert(accumulated[k], entry)
+      if not mergeables[k] then
+        mergeables[k] = setmetatable({
+          __config = v.__config,
+          __entries = {},
+        }, MergeableMT)
       end
-    elseif not M.is_mergeable(v) then
+      for _, entry in ipairs(v.__entries) do
+        table.insert(mergeables[k].__entries, entry)
+      end
+    elseif M._is_plain_table(v) and nested[k] then
+      nested[k].override = v
+    elseif M._is_plain_table(v) then
+      local base_v = base[k]
+      local unwrapped_base = M._unwrap_merged_table(base_v)
+      if M._is_plain_table(unwrapped_base) or (base_v ~= unwrapped_base) then
+        nested[k] = { base = unwrapped_base, override = v }
+      end
+    else
       all_values[k] = all_values[k] or {}
       table.insert(all_values[k], {
         value = M.unwrap(v),
         priority = M.get_priority(v),
         source = M.is_priority(v) and v.__source or { file = 'override', line = 0 },
+        explicit = M.is_priority(v),
       })
     end
   end
 
   for k, entries in pairs(all_values) do
-    if merge_configs[k] then
-      accumulated[k] = accumulated[k] or {}
+    if mergeables[k] then
       for _, entry in ipairs(entries) do
-        table.insert(accumulated[k], entry)
+        table.insert(mergeables[k].__entries, entry)
       end
     else
-      result[k] = M._resolve_singular(k, entries)
+      result[k] = M._resolve_singular(key_path(k), entries)
+    end
+  end
+  
+  for k, tables in pairs(nested) do
+    if tables.override then
+      result[k] = M.merge(tables.base, tables.override, key_path(k))
+    else
+      result[k] = tables.base
     end
   end
 
-  for k, entries in pairs(accumulated) do
-    result[k] = M._make_accumulated(entries, merge_configs[k])
+  for k, mergeable in pairs(mergeables) do
+    result[k] = mergeable
   end
 
-  return M._make_merged_table(result)
+  return setmetatable({ __raw = result }, MergedTableMT)
 end
 
 return M
