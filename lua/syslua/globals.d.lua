@@ -69,6 +69,7 @@
 ---@field path PathHelpers File path utilities
 ---@field build fun(spec: BuildSpec): BuildRef Creates a build within the store
 ---@field bind fun(spec: BindSpec): BindRef Creates a binding to the active system
+---@field getenv fun(name: string): string Returns a placeholder that resolves to the environment variable at execution time
 ---@field register_build_ctx_method fun(name: string, fn: fun(ctx: BuildCtx, ...: any): any) Registers a custom method on BuildCtx
 ---@field register_bind_ctx_method fun(name: string, fn: fun(ctx: BindCtx, ...: any): any) Registers a custom method on BindCtx
 
