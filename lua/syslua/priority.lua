@@ -1,29 +1,3 @@
----@class PriorityValue
----@field __value any
----@field __priority number
----@field __source {file: string, line: number}
-
----@class MergeableValue
----@field __config {separator?: string}
----@field __entries table[]
-
----@class PriorityModule
----@field PRIORITIES {FORCE: number, BEFORE: number, DEFAULT: number, AFTER: number}
----@field force fun(value: any): PriorityValue
----@field before fun(value: any): PriorityValue
----@field default fun(value: any): PriorityValue
----@field after fun(value: any): PriorityValue
----@field order fun(priority: number, value: any): PriorityValue
----@field mergeable fun(opts?: {separator?: string}): MergeableValue
----@field merge fun(base: table, override: table): table
----@field wrap fun(value: any, priority: number, source?: {file: string, line: number}): PriorityValue
----@field unwrap fun(value: any): any
----@field is_priority fun(value: any): boolean
----@field is_mergeable fun(value: any): boolean
----@field get_priority fun(value: any): number
----@field get_source fun(level?: number): {file: string, line: number}
-
----@type PriorityModule
 local M = {}
 
 local PriorityMT = {
@@ -76,6 +50,8 @@ M.PRIORITIES = {
   AFTER = 1500,
 }
 
+---@param level? number
+---@return {file: string, line: number}
 function M.get_source(level)
   if not debug or not debug.getinfo then
     return { file = 'unknown', line = 0 }
@@ -94,6 +70,9 @@ function M.get_source(level)
   return { file = 'unknown', line = 0 }
 end
 
+---@param value any
+---@param priority number
+---@param source? {file: string, line: number}
 function M.wrap(value, priority, source)
   return setmetatable({
     __value = value,
@@ -102,10 +81,14 @@ function M.wrap(value, priority, source)
   }, PriorityMT)
 end
 
+---@param value any
+---@return boolean
 function M.is_priority(value)
   return type(value) == 'table' and getmetatable(value) == PriorityMT
 end
 
+---@param value any
+---@return any
 function M.unwrap(value)
   if M.is_priority(value) then
     return value.__value
@@ -113,6 +96,8 @@ function M.unwrap(value)
   return value
 end
 
+---@param value any
+---@return number
 function M.get_priority(value)
   if M.is_priority(value) then
     return value.__priority
@@ -120,22 +105,28 @@ function M.get_priority(value)
   return M.PRIORITIES.DEFAULT
 end
 
+---@param value any
 function M.force(value)
   return M.wrap(value, M.PRIORITIES.FORCE)
 end
 
+---@param value any
 function M.before(value)
   return M.wrap(value, M.PRIORITIES.BEFORE)
 end
 
+---@param value any
 function M.default(value)
   return M.wrap(value, M.PRIORITIES.DEFAULT)
 end
 
+---@param value any
 function M.after(value)
   return M.wrap(value, M.PRIORITIES.AFTER)
 end
 
+---@param priority number
+---@param value any
 function M.order(priority, value)
   if type(priority) ~= 'number' then
     error('priority.order: first argument must be a number', 2)
@@ -143,6 +134,7 @@ function M.order(priority, value)
   return M.wrap(value, priority)
 end
 
+---@param opts? {separator?: string}
 function M.mergeable(opts)
   opts = opts or {}
   return setmetatable({
@@ -151,10 +143,15 @@ function M.mergeable(opts)
   }, MergeableMT)
 end
 
+---@param value any
+---@return boolean
 function M.is_mergeable(value)
   return type(value) == 'table' and getmetatable(value) == MergeableMT
 end
 
+---@param a any
+---@param b any
+---@return boolean
 function M._values_equal(a, b)
   if type(a) ~= type(b) then
     return false
@@ -175,6 +172,8 @@ function M._values_equal(a, b)
   return a == b
 end
 
+---@param p number
+---@return string
 function M._priority_name(p)
   if p == M.PRIORITIES.FORCE then
     return 'force'
@@ -189,6 +188,8 @@ function M._priority_name(p)
   end
 end
 
+---@param v any
+---@return string
 function M._format_value(v)
   if type(v) == 'string' then
     return string.format('%q', v)
@@ -199,6 +200,9 @@ function M._format_value(v)
   end
 end
 
+---@param key string
+---@param entry1 {value: any, priority: number, source: {file: string, line: number}}
+---@param entry2 {value: any, priority: number, source: {file: string, line: number}}
 function M._raise_conflict(key, entry1, entry2)
   local priority_name = M._priority_name(entry1.priority)
 
@@ -242,6 +246,9 @@ Priority conflict in '%s'
   error(msg, 0)
 end
 
+---@param key string
+---@param entries {value: any, priority: number, source: {file: string, line: number}, explicit: boolean}[]
+---@return any
 function M._resolve_singular(key, entries)
   table.sort(entries, function(a, b)
     if a.priority ~= b.priority then
@@ -276,6 +283,9 @@ function M._resolve_singular(key, entries)
   return winner.value
 end
 
+---@param entries {value: any, priority: number}[]
+---@param config {separator?: string}
+---@return any
 function M._merge_values(entries, config)
   table.sort(entries, function(a, b)
     return a.priority < b.priority
@@ -302,6 +312,8 @@ function M._merge_values(entries, config)
   end
 end
 
+---@param t any
+---@return table
 function M._unwrap_merged_table(t)
   if type(t) == 'table' and getmetatable(t) == MergedTableMT then
     return rawget(t, '__raw')
@@ -309,6 +321,8 @@ function M._unwrap_merged_table(t)
   return t
 end
 
+---@param t any
+---@return boolean
 function M._is_plain_table(t)
   if type(t) ~= 'table' or getmetatable(t) then
     return false
@@ -323,9 +337,13 @@ function M._is_plain_table(t)
   return n ~= #t
 end
 
+---@param base? table
+---@param override? table
+---@param _path? string
+---@return table
 function M.merge(base, override, _path)
   _path = _path or ''
-  
+
   if base == nil then
     return override
   end
@@ -407,7 +425,7 @@ function M.merge(base, override, _path)
       result[k] = M._resolve_singular(key_path(k), entries)
     end
   end
-  
+
   for k, tables in pairs(nested) do
     if tables.override then
       result[k] = M.merge(tables.base, tables.override, key_path(k))
