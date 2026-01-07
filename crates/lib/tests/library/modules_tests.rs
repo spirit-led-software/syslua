@@ -379,7 +379,7 @@ mod env_module {
   }
 
   #[test]
-  fn accepts_vars_table() -> LuaResult<()> {
+  fn accepts_env_vars() -> LuaResult<()> {
     let (lua, manifest) = create_test_runtime()?;
 
     lua
@@ -388,10 +388,8 @@ mod env_module {
             local syslua = require('syslua')
             local prio = require('syslua.priority')
             syslua.modules.env.setup({
-                vars = {
-                    EDITOR = 'nvim',
-                    GOPATH = prio.force('/go'),
-                },
+                EDITOR = 'nvim',
+                GOPATH = prio.force('/go'),
             })
         "#,
       )
@@ -482,7 +480,7 @@ mod env_module {
   }
 
   #[test]
-  fn multiple_setup_calls_merge_vars() -> LuaResult<()> {
+  fn multiple_setup_calls_merge_env_vars() -> LuaResult<()> {
     let (lua, manifest) = create_test_runtime()?;
 
     lua
@@ -493,16 +491,12 @@ mod env_module {
 
             -- First setup sets EDITOR
             syslua.modules.env.setup({
-                vars = {
-                    EDITOR = 'vim',
-                },
+                EDITOR = 'vim',
             })
 
             -- Second setup sets PAGER (different var, should merge)
             syslua.modules.env.setup({
-                vars = {
-                    PAGER = 'less',
-                },
+                PAGER = 'less',
             })
         "#,
       )
@@ -525,16 +519,12 @@ mod env_module {
 
             -- First setup sets EDITOR
             syslua.modules.env.setup({
-                vars = {
-                    EDITOR = 'vim',
-                },
+                EDITOR = 'vim',
             })
 
             -- Second setup forces EDITOR to different value
             syslua.modules.env.setup({
-                vars = {
-                    EDITOR = prio.force('nvim'),
-                },
+                EDITOR = prio.force('nvim'),
             })
         "#,
       )
@@ -554,7 +544,7 @@ mod env_module {
         r#"
             local syslua = require('syslua')
             syslua.modules.env.setup({
-                vars = { EDITOR = 'vim' },
+                EDITOR = 'vim',
             })
         "#,
       )
@@ -624,7 +614,7 @@ mod env_module {
   }
 
   #[test]
-  fn vars_with_mixed_priority_types() -> LuaResult<()> {
+  fn env_vars_with_mixed_priority_types() -> LuaResult<()> {
     let (lua, manifest) = create_test_runtime()?;
 
     lua
@@ -634,11 +624,9 @@ mod env_module {
             local prio = require('syslua.priority')
 
             syslua.modules.env.setup({
-                vars = {
-                    EDITOR = 'vim',              -- plain string
-                    PAGER = prio.default('less'), -- default priority
-                    SHELL = prio.force('/bin/zsh'), -- force priority
-                },
+                EDITOR = 'vim',                  -- plain string
+                PAGER = prio.default('less'),    -- default priority
+                SHELL = prio.force('/bin/zsh'),  -- force priority
             })
         "#,
       )
@@ -687,15 +675,15 @@ mod env_module {
   }
 
   #[test]
-  fn conflicting_vars_without_priority_fails() -> LuaResult<()> {
+  fn conflicting_env_vars_without_priority_fails() -> LuaResult<()> {
     let (lua, _) = create_test_runtime()?;
 
-    // First, verify that direct priority merge detects conflicts
+    // Verify that direct priority merge detects conflicts
     let direct_result = lua
       .load(
         r#"
             local prio = require('syslua.priority')
-            local merged = prio.merge({ vars = { EDITOR = 'vim' } }, { vars = { EDITOR = 'nano' } })
+            local merged = prio.merge({ EDITOR = 'vim' }, { EDITOR = 'nano' })
         "#,
       )
       .exec();
@@ -706,7 +694,7 @@ mod env_module {
   }
 
   #[test]
-  fn conflicting_vars_via_env_setup_fails() -> LuaResult<()> {
+  fn conflicting_env_vars_via_setup_fails() -> LuaResult<()> {
     let (lua, _) = create_test_runtime()?;
 
     let result = lua
@@ -716,18 +704,18 @@ mod env_module {
 
             -- First setup sets EDITOR
             syslua.modules.env.setup({
-                vars = { EDITOR = 'vim' },
+                EDITOR = 'vim',
             })
 
             -- Second setup sets EDITOR to different value without priority
             syslua.modules.env.setup({
-                vars = { EDITOR = 'nano' },
+                EDITOR = 'nano',
             })
         "#,
       )
       .exec();
 
-    assert!(result.is_err(), "conflicting vars without priority should fail");
+    assert!(result.is_err(), "conflicting env vars without priority should fail");
     Ok(())
   }
 

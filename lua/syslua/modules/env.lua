@@ -5,7 +5,7 @@ local M = {}
 
 ---@class EnvOptions
 ---@field PATH? string | priority.PriorityValue<string> | priority.Mergeable<string>
----@field vars? table<string, string | priority.PriorityValue<string>>
+---@field [string] string | priority.PriorityValue<string> Any environment variable
 
 -- Platform-specific path separators
 local PATH_SEP = sys.os == 'windows' and ';' or ':'
@@ -19,7 +19,6 @@ local default_opts = {
     separator = PATH_SEP,
     default = DEFAULT_PATH,
   }),
-  vars = {},
 }
 
 ---@type EnvOptions
@@ -85,39 +84,34 @@ local function get_shell_configs()
   end
 end
 
---- Convert merged opts to a serializable config
+--- Extract environment variables from merged opts
+--- Returns PATH value and a table of other env vars
 ---@param opts EnvOptions
----@return table
-local function serialize_env_config(opts)
-  local config = {
-    PATH = nil,
-    vars = {},
-  }
+---@return string|nil, table<string, string>
+local function extract_env_vars(opts)
+  local path_value = nil
+  local vars = {}
 
-  -- Handle PATH
-  if opts.PATH then
-    if type(opts.PATH) == 'string' then
-      config.PATH = opts.PATH
-    elseif prio.is_mergeable(opts.PATH) then
-      -- Mergeable will be resolved at access time
-      config.PATH = nil -- Will be computed during build
-    elseif prio.is_priority(opts.PATH) then
-      config.PATH = prio.unwrap(opts.PATH)
-    end
-  end
+  for k, v in pairs(opts) do
+    local value = prio.is_priority(v) and prio.unwrap(v) or v
 
-  -- Handle vars
-  if opts.vars then
-    for k, v in pairs(opts.vars) do
-      if prio.is_priority(v) then
-        config.vars[k] = prio.unwrap(v)
-      else
-        config.vars[k] = v
+    if k == 'PATH' then
+      -- PATH might be a mergeable or a resolved string
+      if type(value) == 'string' then
+        path_value = value
+      elseif prio.is_mergeable(v) then
+        -- Mergeable resolves when accessed via pairs()
+        path_value = value
+      end
+    else
+      -- Other env vars
+      if type(value) == 'string' then
+        vars[k] = value
       end
     end
   end
 
-  return config
+  return path_value, vars
 end
 
 --- Generate bash/zsh env file content
@@ -197,21 +191,14 @@ end
 ---@param opts EnvOptions
 ---@return table
 local function create_env_build(opts)
-  local config = serialize_env_config(opts)
-
-  -- Get PATH from mergeable if needed
-  local path_value = config.PATH
-  if not path_value and opts.PATH then
-    -- PATH will be resolved during pairs() on merged table
-    path_value = opts.PATH
-  end
+  local path_value, vars = extract_env_vars(opts)
 
   return sys.build({
     id = '__syslua_env',
     replace = true,
     inputs = {
       path_value = path_value,
-      vars = config.vars,
+      vars = vars,
       os = sys.os,
     },
     create = function(inputs, ctx)
@@ -257,8 +244,7 @@ end
 
 --- Create bind steps to source env files from shell configs
 ---@param build table Build outputs reference
----@param _opts EnvOptions
-local function create_env_binds(build, _opts)
+local function create_env_binds(build)
   local shell_configs = get_shell_configs()
 
   -- Marker for identifying our block
@@ -275,9 +261,6 @@ local function create_env_binds(build, _opts)
         end_marker = END_MARKER,
       },
       create = function(inputs, ctx)
-        local source_block =
-          string.format('%s\n. "%s"\n%s', inputs.begin_marker, inputs.build.outputs.ps1, inputs.end_marker)
-
         -- Create profile directory if needed and add source line
         ctx:exec({
           bin = 'powershell.exe',
@@ -469,6 +452,8 @@ end
 -- ============================================================================
 
 --- Set up environment variables according to the provided options
+--- Environment variables are specified as top-level keys (e.g., EDITOR = 'vim')
+--- PATH is predefined as mergeable and can be extended with prio.before()/after()
 ---@param provided_opts EnvOptions
 M.setup = function(provided_opts)
   local new_opts = prio.merge(M.opts, provided_opts)
@@ -482,7 +467,7 @@ M.setup = function(provided_opts)
   local build = create_env_build(M.opts)
 
   -- Create binds that source env files from shell configs
-  create_env_binds(build, M.opts)
+  create_env_binds(build)
 end
 
 return M
