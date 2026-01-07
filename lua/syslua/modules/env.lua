@@ -59,6 +59,14 @@ local function escape_powershell(str)
   return "'" .. str:gsub("'", "''") .. "'"
 end
 
+--- Escape a string for use in sed regex patterns
+--- Escapes special characters: # / \ . [ ] * ^ $
+---@param str string
+---@return string
+local function escape_sed_pattern(str)
+  return str:gsub('([#/\\%.%[%]%*%^%$])', '\\%1')
+end
+
 --- Get shell config file paths based on privilege level
 ---@return table<string, string>
 local function get_shell_configs()
@@ -346,8 +354,8 @@ if [ -f "$config_path" ]; then
 fi
 ]],
                   outputs.config,
-                  BEGIN_MARKER:gsub('[#]', '\\#'),
-                  END_MARKER:gsub('[#]', '\\#')
+                  escape_sed_pattern(BEGIN_MARKER),
+                  escape_sed_pattern(END_MARKER)
                 ),
               },
             })
@@ -406,8 +414,8 @@ if [ -f "$config_path" ]; then
 fi
 ]],
                 outputs.config,
-                BEGIN_MARKER:gsub('[#]', '\\#'),
-                END_MARKER:gsub('[#]', '\\#')
+                escape_sed_pattern(BEGIN_MARKER),
+                escape_sed_pattern(END_MARKER)
               ),
             },
           })
@@ -426,9 +434,9 @@ end
 --- PATH is predefined as mergeable and can be extended with prio.before()/after()
 ---@param provided_opts EnvOptions
 M.setup = function(provided_opts)
-  local new_opts = prio.merge(M.opts, provided_opts)
+  local new_opts, err = prio.merge(M.opts, provided_opts)
   if not new_opts then
-    error('Failed to merge env options')
+    error(string.format('Failed to merge env options: %s', err or 'unknown error'))
   end
 
   M.opts = new_opts
