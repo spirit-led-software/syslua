@@ -490,7 +490,12 @@ mod tests {
     let completed_binds = HashMap::new();
     let manifest = empty_manifest();
 
-    let parent = BindCtxResolver::new(&completed_builds, &completed_binds, &manifest, "/parent/out".to_string());
+    let parent = BindCtxResolver::new(
+      &completed_builds,
+      &completed_binds,
+      &manifest,
+      "/parent/out".to_string(),
+    );
 
     // Create child with different out_dir
     let mut child = parent.with_out_dir("/child/out".to_string());

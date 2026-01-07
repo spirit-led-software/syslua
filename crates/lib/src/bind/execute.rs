@@ -265,7 +265,10 @@ async fn execute_bind_actions_raw(
 }
 
 /// Resolve the outputs from a bind definition.
-fn resolve_bind_outputs(bind_def: &BindDef, resolver: &BindCtxResolver<'_>) -> Result<HashMap<String, String>, ExecuteError> {
+fn resolve_bind_outputs(
+  bind_def: &BindDef,
+  resolver: &BindCtxResolver<'_>,
+) -> Result<HashMap<String, String>, ExecuteError> {
   let mut outputs = HashMap::new();
 
   if let Some(def_outputs) = &bind_def.outputs {
