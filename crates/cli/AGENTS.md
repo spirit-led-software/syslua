@@ -22,18 +22,18 @@ cli/
 
 ## COMMANDS
 
-| Command | File | Purpose |
-|---------|------|---------|
-| `sys apply` | `apply.rs` | Evaluate config, apply changes |
-| `sys plan` | `plan.rs` | Dry-run of apply |
-| `sys destroy` | `destroy.rs` | Remove all binds |
-| `sys diff` | `diff.rs` | Compare snapshots |
-| `sys update` | `update.rs` | Re-resolve inputs to latest |
-| `sys status` | `status.rs` | Current state vs expected |
-| `sys gc` | `gc.rs` | Clean unused store objects |
-| `sys info` | `info.rs` | Display system info |
-| `sys init` | `init.rs` | Initialize config directory |
-| `sys snapshot` | `snapshot/` | Subcommands: list, show, rollback, delete |
+| Command        | File         | Purpose                                   |
+| -------------- | ------------ | ----------------------------------------- |
+| `sys apply`    | `apply.rs`   | Evaluate config, apply changes            |
+| `sys plan`     | `plan.rs`    | Dry-run of apply                          |
+| `sys destroy`  | `destroy.rs` | Remove all binds                          |
+| `sys diff`     | `diff.rs`    | Compare snapshots                         |
+| `sys update`   | `update.rs`  | Re-resolve inputs to latest               |
+| `sys status`   | `status.rs`  | Current state vs expected                 |
+| `sys gc`       | `gc.rs`      | Clean unused store objects                |
+| `sys info`     | `info.rs`    | Display system info                       |
+| `sys init`     | `init.rs`    | Initialize config directory               |
+| `sys snapshot` | `snapshot/`  | Subcommands: list, show, rollback, delete |
 
 ## ADDING A COMMAND
 

@@ -4,7 +4,7 @@
 
 ## OVERVIEW
 
-Core library for syslua. Implements content-addressed store, Lua configuration evaluation, 
+Core library for syslua. Implements content-addressed store, Lua configuration evaluation,
 atomic binds with rollback, and parallel DAG execution.
 
 ## STRUCTURE
@@ -22,29 +22,29 @@ atomic binds with rollback, and parallel DAG execution.
 
 ## WHERE TO LOOK
 
-| Task | Location | Notes |
-|------|----------|-------|
-| Parallel Execution | `execute/mod.rs` | Wave-based scheduler using JoinSet |
-| Apply/Rollback Flow | `execute/apply.rs` | High-level orchestration (1.5k lines) |
-| Build Hashing | `build/types.rs` | Serializable BuildDef determines ObjectHash |
-| Bind Logic | `bind/execute.rs` | Platform-specific side effect application |
-| Placeholder Eval | `execute/resolver.rs` | Resolves $${...} during execution |
-| Transitive Deps | `inputs/resolve.rs` | Recursive input fetching (1.8k lines) |
-| State Diffing | `snapshot/diff.rs` | Current vs desired state comparison |
+| Task                | Location              | Notes                                       |
+| ------------------- | --------------------- | ------------------------------------------- |
+| Parallel Execution  | `execute/mod.rs`      | Wave-based scheduler using JoinSet          |
+| Apply/Rollback Flow | `execute/apply.rs`    | High-level orchestration (1.5k lines)       |
+| Build Hashing       | `build/types.rs`      | Serializable BuildDef determines ObjectHash |
+| Bind Logic          | `bind/execute.rs`     | Platform-specific side effect application   |
+| Placeholder Eval    | `execute/resolver.rs` | Resolves $${...} during execution           |
+| Transitive Deps     | `inputs/resolve.rs`   | Recursive input fetching (1.8k lines)       |
+| State Diffing       | `snapshot/diff.rs`    | Current vs desired state comparison         |
 
 ## CODE MAP
 
-| Symbol | Type | Location | Role |
-|--------|------|----------|------|
-| `ExecutionDag` | struct | `execute/dag.rs` | Dependency graph for builds and binds |
+| Symbol              | Type   | Location              | Role                                          |
+| ------------------- | ------ | --------------------- | --------------------------------------------- |
+| `ExecutionDag`      | struct | `execute/dag.rs`      | Dependency graph for builds and binds         |
 | `ExecutionResolver` | struct | `execute/resolver.rs` | Resolves placeholders against completed nodes |
-| `Action` | enum | `action/mod.rs` | Serializable command or fetch operation |
-| `ActionCtx` | struct | `action/types.rs` | Base context for build/bind execution |
-| `BindState` | struct | `bind/state.rs` | Persisted outputs for drift check/destroy |
-| `StateDiff` | struct | `snapshot/diff.rs` | Comparison between current and desired state |
-| `LuaNamespace` | struct | `inputs/types.rs` | Discovered Lua module paths from inputs |
-| `ObjectHash` | struct | `util/hash.rs` | 20-char truncated SHA256 |
-| `Resolver` | trait | `placeholder.rs` | JIT placeholder substitution |
+| `Action`            | enum   | `action/mod.rs`       | Serializable command or fetch operation       |
+| `ActionCtx`         | struct | `action/types.rs`     | Base context for build/bind execution         |
+| `BindState`         | struct | `bind/state.rs`       | Persisted outputs for drift check/destroy     |
+| `StateDiff`         | struct | `snapshot/diff.rs`    | Comparison between current and desired state  |
+| `LuaNamespace`      | struct | `inputs/types.rs`     | Discovered Lua module paths from inputs       |
+| `ObjectHash`        | struct | `util/hash.rs`        | 20-char truncated SHA256                      |
+| `Resolver`          | trait  | `placeholder.rs`      | JIT placeholder substitution                  |
 
 ## CONVENTIONS
 
@@ -66,10 +66,10 @@ atomic binds with rollback, and parallel DAG execution.
 
 ## COMPLEXITY HOTSPOTS
 
-| File | Lines | Complexity |
-|------|-------|------------|
-| `inputs/resolve.rs` | 1860 | Transitive resolution loop, override handling |
-| `execute/apply.rs` | 1593 | Atomic rollback, snapshot management |
-| `execute/mod.rs` | 1234 | Wave parallelism with JoinSet |
-| `bind/execute.rs` | 1128 | Four Resolver types, platform dispatch |
-| `execute/dag.rs` | 1071 | Heterogeneous build/bind graph |
+| File                | Lines | Complexity                                    |
+| ------------------- | ----- | --------------------------------------------- |
+| `inputs/resolve.rs` | 1860  | Transitive resolution loop, override handling |
+| `execute/apply.rs`  | 1593  | Atomic rollback, snapshot management          |
+| `execute/mod.rs`    | 1234  | Wave parallelism with JoinSet                 |
+| `bind/execute.rs`   | 1128  | Four Resolver types, platform dispatch        |
+| `execute/dag.rs`    | 1071  | Heterogeneous build/bind graph                |

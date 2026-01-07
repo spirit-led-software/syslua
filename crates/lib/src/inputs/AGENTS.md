@@ -5,6 +5,7 @@
 **OVERVIEW:** Declarative input resolution, dependency graphing, and lockfile management.
 
 ## FILES
+
 - `mod.rs`: Module entry and orchestration logic.
 - `source.rs`: URL parsing for `git:`, `path:`, and shorthand sources.
 - `resolve.rs`: Transitive resolution engine; handles `follows` and overrides.
@@ -15,6 +16,7 @@
 - `types.rs`: Core types (`InputDecl`, `ResolvedInput`, `InputOverride`).
 
 ## KEY TYPES
+
 - `InputSource`: Parsed request (URL/Path/Revision).
 - `ResolvedInput`: Fetched input with pinned hash and transitive deps.
 - `InputGraph`: DAG representing the full dependency tree.
@@ -22,6 +24,7 @@
 - `InputOverride`: Specification for transitive dependency redirection (`follows`).
 
 ## FLOW
+
 1. **Load**: Load `LockFile` and parse `InputDecl` from Lua config.
 2. **Fetch**: `fetch.rs` retrieves content; `store.rs` caches the results.
 3. **Recurse**: `resolve.rs` inspects `init.lua` of fetched inputs for sub-deps.
@@ -31,6 +34,7 @@
 7. **Pin**: Generate updated `LockFile` for reproducibility.
 
 ## GOTCHAS
+
 - **Transitive Complexity**: `resolve.rs` is the most complex part (1.8k lines).
 - **Namespace Conflicts**: Occur when multiple inputs provide the same top-level Lua module.
 - **Lock Reconciliation**: Updates only occur on explicit `sys update` or URL changes.
