@@ -5,14 +5,15 @@
 
 use std::collections::{HashMap, HashSet};
 
-use petgraph::Direction;
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::Direction;
 use tracing::trace;
 
 use crate::bind::{BindDef, BindInputsDef};
 use crate::build::BuildInputs;
 use crate::manifest::Manifest;
+use crate::placeholder::{self, Placeholder, Segment};
 use crate::util::hash::ObjectHash;
 
 use super::types::ExecuteError;
@@ -78,19 +79,15 @@ impl ExecutionDag {
     }
 
     // Second pass: add edges for build dependencies
-    // Note: BuildInputs can only contain Build references (enforced at type level),
-    // so we only need to check for build dependencies here.
     for (hash, build_def) in &manifest.builds {
       let dependent_idx = build_nodes[hash];
 
       if let Some(inputs) = &build_def.inputs {
-        for dep_hash in extract_build_dependencies(inputs) {
+        for dep_hash in extract_build_dependencies(inputs)? {
           if let Some(&dep_idx) = build_nodes.get(&dep_hash) {
-            // Edge from dependency to dependent
             graph.add_edge(dep_idx, dependent_idx, ());
             trace!(from = %dep_hash.0, to = %hash.0, "added build dependency edge");
           }
-          // If dependency not found, it might be external - ignore for now
         }
       }
     }
@@ -416,44 +413,72 @@ impl ExecutionDag {
 
 /// Extract build dependencies from BuildInputs.
 ///
-/// Since BuildInputs can only contain Build references (no Bind variant),
-/// this only returns build hashes.
-fn extract_build_dependencies(inputs: &BuildInputs) -> Vec<ObjectHash> {
+/// Scans both explicit Build references and placeholder strings like
+/// `$${build:HASH:output}` within String values.
+///
+/// # Errors
+///
+/// Returns an error if any String value contains a `$${bind:...}` placeholder,
+/// since builds cannot depend on binds.
+fn extract_build_dependencies(inputs: &BuildInputs) -> Result<Vec<ObjectHash>, ExecuteError> {
   let mut deps = Vec::new();
-  collect_build_dependencies(inputs, &mut deps);
-  deps
+  collect_build_dependencies(inputs, &mut deps)?;
+  Ok(deps)
 }
 
-/// Recursively collect build dependencies from nested BuildInputs.
-fn collect_build_dependencies(inputs: &BuildInputs, deps: &mut Vec<ObjectHash>) {
+fn collect_build_dependencies(inputs: &BuildInputs, deps: &mut Vec<ObjectHash>) -> Result<(), ExecuteError> {
   match inputs {
     BuildInputs::Build(hash) => {
       deps.push(hash.clone());
     }
     BuildInputs::Table(map) => {
       for value in map.values() {
-        collect_build_dependencies(value, deps);
+        collect_build_dependencies(value, deps)?;
       }
     }
     BuildInputs::Array(arr) => {
       for value in arr {
-        collect_build_dependencies(value, deps);
+        collect_build_dependencies(value, deps)?;
       }
     }
-    BuildInputs::String(_) | BuildInputs::Number(_) | BuildInputs::Boolean(_) => {}
+    BuildInputs::String(s) => {
+      extract_placeholder_deps_for_build(s, deps)?;
+    }
+    BuildInputs::Number(_) | BuildInputs::Boolean(_) => {}
   }
+  Ok(())
 }
 
-/// Extract build and bind dependencies from BindInputs.
-///
-/// BindInputs can contain both Build and Bind references.
+fn extract_placeholder_deps_for_build(s: &str, deps: &mut Vec<ObjectHash>) -> Result<(), ExecuteError> {
+  let segments = match placeholder::parse(s) {
+    Ok(segs) => segs,
+    Err(_) => return Ok(()), // Invalid placeholder syntax - not our concern here
+  };
+
+  for segment in segments {
+    if let Segment::Placeholder(p) = segment {
+      match p {
+        Placeholder::Build { hash, .. } => {
+          deps.push(ObjectHash(hash));
+        }
+        Placeholder::Bind { hash, .. } => {
+          return Err(ExecuteError::InvalidManifest(format!(
+            "build input contains bind placeholder '${{bind:{hash}:...}}' - builds cannot depend on binds"
+          )));
+        }
+        Placeholder::Action(_) | Placeholder::Out | Placeholder::Env(_) => {}
+      }
+    }
+  }
+  Ok(())
+}
+
 fn extract_bind_dependencies(inputs: &BindInputsDef) -> Vec<DagNode> {
   let mut deps = Vec::new();
   collect_bind_dependencies(inputs, &mut deps);
   deps
 }
 
-/// Recursively collect dependencies from nested BindInputs.
 fn collect_bind_dependencies(inputs: &BindInputsDef, deps: &mut Vec<DagNode>) {
   match inputs {
     BindInputsDef::Build(hash) => {
@@ -472,7 +497,30 @@ fn collect_bind_dependencies(inputs: &BindInputsDef, deps: &mut Vec<DagNode>) {
         collect_bind_dependencies(value, deps);
       }
     }
-    BindInputsDef::String(_) | BindInputsDef::Number(_) | BindInputsDef::Boolean(_) => {}
+    BindInputsDef::String(s) => {
+      extract_placeholder_deps_for_bind(s, deps);
+    }
+    BindInputsDef::Number(_) | BindInputsDef::Boolean(_) => {}
+  }
+}
+
+fn extract_placeholder_deps_for_bind(s: &str, deps: &mut Vec<DagNode>) {
+  let Ok(segments) = placeholder::parse(s) else {
+    return;
+  };
+
+  for segment in segments {
+    if let Segment::Placeholder(p) = segment {
+      match p {
+        Placeholder::Build { hash, .. } => {
+          deps.push(DagNode::Build(ObjectHash(hash)));
+        }
+        Placeholder::Bind { hash, .. } => {
+          deps.push(DagNode::Bind(ObjectHash(hash)));
+        }
+        Placeholder::Action(_) | Placeholder::Out | Placeholder::Env(_) => {}
+      }
+    }
   }
 }
 
@@ -481,8 +529,8 @@ mod tests {
   use std::collections::BTreeMap;
 
   use super::*;
-  use crate::action::Action;
   use crate::action::actions::exec::ExecOpts;
+  use crate::action::Action;
   use crate::bind::BindDef;
   use crate::build::BuildDef;
   use crate::util::hash::Hashable;
@@ -1067,5 +1115,79 @@ mod tests {
 
     // For destroy: all can be destroyed in parallel (same wave)
     // Order within the wave doesn't matter
+  }
+
+  #[test]
+  fn build_with_placeholder_string_dependency() {
+    let build_a = make_build("a", None);
+    let hash_a = build_a.compute_hash().unwrap();
+
+    let placeholder_str = format!("$${{build:{}:out}}", hash_a.0);
+    let build_b = make_build("b", Some(BuildInputs::String(placeholder_str)));
+    let hash_b = build_b.compute_hash().unwrap();
+
+    let mut manifest = Manifest::default();
+    manifest.builds.insert(hash_a.clone(), build_a);
+    manifest.builds.insert(hash_b.clone(), build_b);
+
+    let dag = ExecutionDag::from_manifest(&manifest).unwrap();
+
+    assert!(dag.has_dependencies(&hash_b));
+    assert_eq!(dag.build_dependencies(&hash_b), vec![hash_a.clone()]);
+
+    let waves = dag.build_waves().unwrap();
+    assert_eq!(waves.len(), 2);
+  }
+
+  #[test]
+  fn build_with_bind_placeholder_errors() {
+    let bind = make_bind(None);
+    let bind_hash = bind.compute_hash().unwrap();
+
+    let placeholder_str = format!("$${{bind:{}:out}}", bind_hash.0);
+    let build = make_build("b", Some(BuildInputs::String(placeholder_str)));
+    let build_hash = build.compute_hash().unwrap();
+
+    let mut manifest = Manifest::default();
+    manifest.bindings.insert(bind_hash, bind);
+    manifest.builds.insert(build_hash, build);
+
+    let result = ExecutionDag::from_manifest(&manifest);
+    match result {
+      Err(ExecuteError::InvalidManifest(msg)) => {
+        assert!(msg.contains("builds cannot depend on binds"));
+      }
+      Err(other) => panic!("expected InvalidManifest error, got {:?}", other),
+      Ok(_) => panic!("expected error, got Ok"),
+    }
+  }
+
+  #[test]
+  fn bind_with_placeholder_string_dependencies() {
+    let build_a = make_build("a", None);
+    let build_hash_a = build_a.compute_hash().unwrap();
+
+    let bind_b = make_bind(None);
+    let bind_hash_b = bind_b.compute_hash().unwrap();
+
+    let placeholder_str = format!(
+      "$${{build:{}:out}} and $${{bind:{}:out}}",
+      build_hash_a.0, bind_hash_b.0
+    );
+    let bind_c = make_bind(Some(BindInputsDef::String(placeholder_str)));
+    let bind_hash_c = bind_c.compute_hash().unwrap();
+
+    let mut manifest = Manifest::default();
+    manifest.builds.insert(build_hash_a.clone(), build_a);
+    manifest.bindings.insert(bind_hash_b.clone(), bind_b);
+    manifest.bindings.insert(bind_hash_c.clone(), bind_c);
+
+    let dag = ExecutionDag::from_manifest(&manifest).unwrap();
+
+    let build_deps = dag.bind_build_dependencies(&bind_hash_c);
+    assert_eq!(build_deps, vec![build_hash_a]);
+
+    let bind_deps = dag.bind_bind_dependencies(&bind_hash_c);
+    assert_eq!(bind_deps, vec![bind_hash_b]);
   }
 }
