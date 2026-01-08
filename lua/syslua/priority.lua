@@ -2,26 +2,26 @@ local M = {}
 
 -- Type definitions for LuaLS
 
----@class priority.Source
+---@class syslua.priority.Source
 ---@field file string
 ---@field line number
 
----@class priority.PriorityValue<T>: {__value: T, __priority: number, __source: priority.Source}
+---@class syslua.priority.PriorityValue<T>: {__value: T, __priority: number, __source: syslua.priority.Source}
 
----@class priority.MergeableConfig: {separator: string}
+---@class syslua.priority.MergeableConfig: {separator: string}
 ---@field separator? string
 
----@class priority.MergeableEntry<T>: {value: T}
+---@class syslua.priority.MergeableEntry<T>: {value: T}
 ---@field priority number
----@field source priority.Source
+---@field source syslua.priority.Source
 
----@class priority.Mergeable<T>: {__entries: priority.MergeableEntry<T>[], __config: priority.MergeableConfig}
+---@class syslua.priority.Mergeable<T>: {__entries: syslua.priority.MergeableEntry<T>[], __config: syslua.priority.MergeableConfig}
 ---@field separator? string
 
----@class priority.MergeableOpts<T>: {default: T}
+---@class syslua.priority.MergeableOpts<T>: {default: T}
 ---@field separator? string
 
----@class priority.MergedTable<T>: {__raw: T}
+---@class syslua.priority.MergedTable<T>: {__raw: T}
 
 -- Forward declarations for private helper functions
 local values_equal
@@ -141,8 +141,8 @@ format_value = function(v)
 end
 
 ---@param key string
----@param entry1 {value: unknown, priority: number, source: priority.Source}
----@param entry2 {value: unknown, priority: number, source: priority.Source}
+---@param entry1 {value: unknown, priority: number, source: syslua.priority.Source}
+---@param entry2 {value: unknown, priority: number, source: syslua.priority.Source}
 raise_conflict = function(key, entry1, entry2)
   local pname = priority_name(entry1.priority)
 
@@ -159,9 +159,9 @@ Priority conflict in '%s'
     %s = %s
 
   Resolution options:
-  1. Use priority.force() to explicitly override
-  2. Use priority.before() or after() to adjust priority
-  3. Use priority.order() for custom priority values
+  1. Use syslua.priority.force() to explicitly override
+  2. Use syslua.priority.before() or after() to adjust priority
+  3. Use syslua.priority.order() for custom priority values
   4. Remove one of the conflicting declarations
 
   Built-in priorities:
@@ -187,7 +187,7 @@ Priority conflict in '%s'
 end
 
 ---@param key string
----@param entries {value: unknown, priority: number, source: priority.Source, explicit: boolean}[]
+---@param entries {value: unknown, priority: number, source: syslua.priority.Source, explicit: boolean}[]
 ---@return unknown
 resolve_singular = function(key, entries)
   table.sort(entries, function(a, b)
@@ -227,7 +227,7 @@ resolve_singular = function(key, entries)
 end
 
 ---@param entries {value: unknown, priority: number}[]
----@param config priority.MergeableConfig
+---@param config syslua.priority.MergeableConfig
 ---@return string | unknown[]
 merge_values = function(entries, config)
   table.sort(entries, function(a, b)
@@ -256,7 +256,7 @@ merge_values = function(entries, config)
 end
 
 ---@generic T: table
----@param t T | priority.MergedTable<T>
+---@param t T | syslua.priority.MergedTable<T>
 ---@return T
 unwrap_merged_table = function(t)
   if type(t) == 'table' and getmetatable(t) == MergedTableMT then
@@ -288,7 +288,7 @@ end
 -- Public API
 
 ---@param level? number
----@return priority.Source
+---@return syslua.priority.Source
 function M.get_source(level)
   if not debug or not debug.getinfo then
     return { file = 'unknown', line = 0 }
@@ -310,8 +310,8 @@ end
 ---@generic T
 ---@param value T
 ---@param priority number
----@param source? priority.Source
----@return priority.PriorityValue<T>
+---@param source? syslua.priority.Source
+---@return syslua.priority.PriorityValue<T>
 function M.wrap(value, priority, source)
   return setmetatable({
     __value = value,
@@ -327,7 +327,7 @@ function M.is_priority(value)
 end
 
 ---@generic T
----@param value T | priority.PriorityValue<T>
+---@param value T | syslua.priority.PriorityValue<T>
 ---@return T
 function M.unwrap(value)
   if M.is_priority(value) then
@@ -347,28 +347,28 @@ end
 
 ---@generic T
 ---@param value T
----@return priority.PriorityValue<T>
+---@return syslua.priority.PriorityValue<T>
 function M.force(value)
   return M.wrap(value, M.PRIORITIES.FORCE)
 end
 
 ---@generic T
 ---@param value T
----@return priority.PriorityValue<T>
+---@return syslua.priority.PriorityValue<T>
 function M.before(value)
   return M.wrap(value, M.PRIORITIES.BEFORE)
 end
 
 ---@generic T
 ---@param value T
----@return priority.PriorityValue<T>
+---@return syslua.priority.PriorityValue<T>
 function M.default(value)
   return M.wrap(value, M.PRIORITIES.DEFAULT)
 end
 
 ---@generic T
 ---@param value T
----@return priority.PriorityValue<T>
+---@return syslua.priority.PriorityValue<T>
 function M.after(value)
   return M.wrap(value, M.PRIORITIES.AFTER)
 end
@@ -376,17 +376,17 @@ end
 ---@generic T
 ---@param priority number
 ---@param value T
----@return priority.PriorityValue<T>
+---@return syslua.priority.PriorityValue<T>
 function M.order(priority, value)
   if type(priority) ~= 'number' then
-    error('priority.order: first argument must be a number', 2)
+    error('syslua.priority.order: first argument must be a number', 2)
   end
   return M.wrap(value, priority)
 end
 
 ---@generic T
----@param opts? priority.MergeableOpts<T>
----@return priority.Mergeable<T>
+---@param opts? syslua.priority.MergeableOpts<T>
+---@return syslua.priority.Mergeable<T>
 function M.mergeable(opts)
   opts = opts or {}
   local m = setmetatable({
@@ -412,11 +412,11 @@ function M.is_mergeable(value)
   return type(value) == 'table' and getmetatable(value) == MergeableMT
 end
 
----@generic T: table
+---@generic T: table?
 ---@param base? T
 ---@param override? T
 ---@param _path? string
----@return priority.MergedTable<T>?
+---@return T
 function M.merge(base, override, _path)
   _path = _path or ''
 
