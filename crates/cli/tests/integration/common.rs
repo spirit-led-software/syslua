@@ -2,8 +2,8 @@
 
 use std::path::PathBuf;
 
-use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
+use assert_cmd::Command;
 use tempfile::TempDir;
 
 /// Get path to a fixture file.
@@ -31,11 +31,27 @@ impl TestEnv {
   /// Create from a fixture file.
   ///
   /// Copies the fixture content to a temporary `init.lua` file.
+  /// Creates a symlink to the workspace lua/ directory for library access.
   pub fn from_fixture(name: &str) -> Self {
     let temp = TempDir::new().unwrap();
     let config_path = temp.path().join("init.lua");
     let content = fixture_content(name);
     std::fs::write(&config_path, content).unwrap();
+
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .parent()
+      .unwrap()
+      .parent()
+      .unwrap()
+      .to_path_buf();
+    let lua_src = workspace_root.join("lua");
+    let lua_dst = temp.path().join("lua");
+
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&lua_src, &lua_dst).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&lua_src, &lua_dst).unwrap();
+
     Self { temp, config_path }
   }
 
