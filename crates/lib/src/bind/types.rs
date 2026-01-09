@@ -479,6 +479,11 @@ impl BindCtx {
     self.0.exec(opts)
   }
 
+  /// Returns the number of actions recorded so far.
+  pub fn action_count(&self) -> usize {
+    self.0.action_count()
+  }
+
   /// Consume the context and return the recorded actions.
   pub fn into_actions(self) -> Vec<Action> {
     self.0.into_actions()

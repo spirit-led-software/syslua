@@ -22,6 +22,7 @@ use super::{BUILD_REF_TYPE, BuildCtx, BuildDef, BuildInputs, BuildRef, BuildSpec
 impl LuaUserData for BuildCtx {
   fn add_fields<F: LuaUserDataFields<Self>>(fields: &mut F) {
     fields.add_field_method_get("out", |_, this| Ok(this.out().to_string()));
+    fields.add_field_method_get("action_count", |_, this| Ok(this.action_count()));
   }
 
   fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {

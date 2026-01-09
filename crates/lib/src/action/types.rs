@@ -154,6 +154,11 @@ impl ActionCtx {
     format!("$${{action:{}}}", index)
   }
 
+  /// Returns the number of actions recorded so far.
+  pub fn action_count(&self) -> usize {
+    self.actions.len()
+  }
+
   /// Consume the context and return the recorded actions.
   ///
   /// This is called after the `apply` function completes to extract
