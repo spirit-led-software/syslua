@@ -1,4 +1,6 @@
 ---@class syslua.lib
+---@field extract fun(opts: syslua.lib.extract.Options): BuildRef
+---@field programs syslua.lib.programs
 local M = {}
 
 setmetatable(M, {
@@ -17,12 +19,20 @@ setmetatable(M, {
   end,
 })
 
----@class FetchUrlOptions
+M.get_home = function()
+  if sys.os == 'windows' then
+    return sys.getenv('USERPROFILE')
+  else
+    return sys.getenv('HOME')
+  end
+end
+
+---@class syslua.lib.fetch_url.Options
 ---@field url string
 ---@field sha256 string
 
 ---Fetches a file from a URL and verifies its SHA256 checksum.
----@param opts FetchUrlOptions
+---@param opts syslua.lib.fetch_url.Options
 ---@return BuildRef
 function M.fetch_url(opts)
   if not opts.url then

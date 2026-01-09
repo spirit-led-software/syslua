@@ -4,12 +4,7 @@ local lib = require('syslua.lib')
 ---@class syslua.pkgs.cli.fd
 local M = {}
 
----@class FdRelease
----@field url string
----@field sha256 string
----@field format ArchiveFormat
-
----@type table<string, table<string, FdRelease>>
+---@type syslua.pkgs.Releases
 M.releases = {
   ['v10.2.0'] = {
     ['aarch64-darwin'] = {
@@ -35,7 +30,7 @@ M.releases = {
   },
 }
 
----@class FdMeta
+---@type syslua.pkgs.Meta
 M.meta = {
   name = 'fd',
   homepage = 'https://github.com/sharkdp/fd',
@@ -47,18 +42,17 @@ M.meta = {
   },
 }
 
----@class FdOptions
----@field version? string Version to install (default: stable)
+---@class syslua.pkgs.cli.fd.Options
+---@field version? string | syslua.priority.PriorityValue<string>
 
 local default_opts = {
   version = prio.default(M.meta.versions.stable),
 }
 
----@type FdOptions
+---@type syslua.pkgs.cli.fd.Options
 M.opts = default_opts
 
----Build fd package
----@param provided_opts? FdOptions
+---@param provided_opts? syslua.pkgs.cli.fd.Options
 ---@return BuildRef
 function M.setup(provided_opts)
   local new_opts = prio.merge(M.opts, provided_opts or {})
@@ -91,20 +85,60 @@ function M.setup(provided_opts)
     )
   end
 
-  local extracted = lib.extract({
+  local archive = lib.fetch_url({
     url = platform_release.url,
     sha256 = platform_release.sha256,
+  })
+
+  local extracted = lib.extract({
+    archive = archive.outputs.out,
     format = platform_release.format,
     strip_components = 1,
   })
 
-  local bin_name = 'fd' .. (sys.os == 'windows' and '.exe' or '')
-  return {
-    outputs = {
-      bin = extracted.outputs.out .. '/' .. bin_name,
-      out = extracted.outputs.out,
+  return sys.build({
+    inputs = {
+      extracted = extracted,
     },
-  }
+    create = function(inputs, ctx)
+      local bin_name = 'fd' .. (sys.os == 'windows' and '.exe' or '')
+      local man_name = 'fd.1'
+      local completions_dir = 'autocomplete'
+
+      local src = inputs.extracted.outputs.out
+      if sys.os == 'windows' then
+        ctx:exec({
+          bin = 'cmd.exe',
+          args = {
+            '/c',
+            string.format(
+              'copy "%s\\%s" "%s\\" && copy "%s\\%s" "%s\\" && xcopy /E /I "%s\\%s" "%s\\%s"',
+              src,
+              bin_name,
+              ctx.out,
+              src,
+              man_name,
+              ctx.out,
+              src,
+              completions_dir,
+              ctx.out,
+              completions_dir
+            ),
+          },
+        })
+      else
+        ctx:exec({ bin = '/bin/cp', args = { src .. '/' .. bin_name, ctx.out .. '/' } })
+        ctx:exec({ bin = '/bin/cp', args = { src .. '/' .. man_name, ctx.out .. '/' } })
+        ctx:exec({ bin = '/bin/cp', args = { '-r', src .. '/' .. completions_dir, ctx.out .. '/' } })
+      end
+      return {
+        bin = sys.path.join(ctx.out, bin_name),
+        man = sys.path.join(ctx.out, man_name),
+        completions = sys.path.join(ctx.out, completions_dir),
+        out = ctx.out,
+      }
+    end,
+  })
 end
 
 return M

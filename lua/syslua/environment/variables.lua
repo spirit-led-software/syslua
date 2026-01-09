@@ -1,11 +1,10 @@
 local prio = require('syslua.priority')
+local lib = require('syslua.lib')
 
----@class syslua.modules.env
+---@class syslua.environment.variables
 local M = {}
 
----@class EnvOptions
----@field PATH? string | priority.PriorityValue<string> | priority.Mergeable<string>
----@field [string] string | priority.PriorityValue<string> Any environment variable
+---@class syslua.environment.variables.Options: table<string, syslua.OptionValue<string>>
 
 -- Platform-specific path separators
 local PATH_SEP = sys.os == 'windows' and ';' or ':'
@@ -21,19 +20,12 @@ local default_opts = {
   }),
 }
 
----@type EnvOptions
+---@type syslua.environment.variables.Options
 M.opts = default_opts
 
 -- ============================================================================
 -- Helper Functions
 -- ============================================================================
-
---- Get the user's home directory
----@return string
-local function get_home()
-  -- Use placeholder that resolves at execution time
-  return sys.getenv('HOME')
-end
 
 --- Escape a string for POSIX shell (bash/zsh)
 ---@param str string
@@ -70,7 +62,7 @@ end
 --- Get shell config file paths based on privilege level
 ---@return table<string, string>
 local function get_shell_configs()
-  local home = get_home()
+  local home = lib.get_home()
 
   if sys.is_elevated then
     -- Global config paths
@@ -94,7 +86,7 @@ end
 
 --- Extract environment variables from merged opts
 --- Note: opts is a MergedTable whose __pairs resolves all values
----@param opts EnvOptions
+---@param opts syslua.environment.variables.Options
 ---@return table<string, string>
 local function extract_env_vars(opts)
   local vars = {}
@@ -167,7 +159,7 @@ end
 -- ============================================================================
 
 --- Create the build step that generates env files
----@param opts EnvOptions
+---@param opts syslua.environment.variables.Options
 ---@return table
 local function create_env_build(opts)
   local vars = extract_env_vars(opts)
@@ -350,7 +342,7 @@ fi
                   [[
 config_path="%s"
 if [ -f "$config_path" ]; then
-  sed -i.bak '/%s/,/%s/d' "$config_path" && rm -f "$config_path.bak"
+  sed '/%s/,/%s/d' "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
 fi
 ]],
                   outputs.config,
@@ -410,7 +402,7 @@ fi
                 [[
 config_path="%s"
 if [ -f "$config_path" ]; then
-  sed -i.bak '/%s/,/%s/d' "$config_path" && rm -f "$config_path.bak"
+  sed '/%s/,/%s/d' "$config_path" > "$config_path.tmp" && mv "$config_path.tmp" "$config_path"
 fi
 ]],
                 outputs.config,
@@ -432,7 +424,7 @@ end
 --- Set up environment variables according to the provided options
 --- Environment variables are specified as top-level keys (e.g., EDITOR = 'vim')
 --- PATH is predefined as mergeable and can be extended with prio.before()/after()
----@param provided_opts EnvOptions
+---@param provided_opts syslua.environment.variables.Options
 M.setup = function(provided_opts)
   local new_opts, err = prio.merge(M.opts, provided_opts)
   if not new_opts then

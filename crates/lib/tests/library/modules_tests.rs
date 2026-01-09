@@ -8,29 +8,6 @@ mod file_module {
   use super::*;
 
   #[test]
-  fn requires_target() -> LuaResult<()> {
-    let (lua, _) = create_test_runtime()?;
-
-    let result = lua
-      .load(
-        r#"
-            local syslua = require('syslua')
-            syslua.modules.file.setup({ content = 'hello' })
-        "#,
-      )
-      .exec();
-
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(
-      err_msg.contains("requires a 'target'"),
-      "Expected error about missing target, got: {}",
-      err_msg
-    );
-    Ok(())
-  }
-
-  #[test]
   fn requires_source_or_content() -> LuaResult<()> {
     let (lua, _) = create_test_runtime()?;
 
@@ -38,7 +15,7 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({ target = '/tmp/test.txt' })
+            syslua.environment.files.setup({ ['/tmp/test.txt'] = {} })
         "#,
       )
       .exec();
@@ -61,10 +38,11 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello world',
-                mutable = true,
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                  content = 'hello world',
+                  mutable = true,
+                }
             })
         "#,
       )
@@ -84,10 +62,11 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello world',
-                mutable = false,
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello world',
+                    mutable = false,
+                }
             })
         "#,
       )
@@ -107,9 +86,10 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello world',
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello world',
+                }
             })
         "#,
       )
@@ -129,9 +109,10 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/myconfig',
-                source = '/path/to/source/config',
+            syslua.environment.files.setup({
+                ['/tmp/myconfig'] = {
+                    source = '/path/to/source/config',
+                }
             })
         "#,
       )
@@ -151,9 +132,10 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/home/user/.config/myapp.conf',
-                content = 'config data',
+            syslua.environment.files.setup({
+                ['/home/user/.config/myapp.conf'] = {
+                    content = 'config data',
+                }
             })
         "#,
       )
@@ -177,9 +159,10 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello',
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello',
+                }
             })
         "#,
       )
@@ -206,9 +189,10 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello',
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello',
+                }
             })
         "#,
       )
@@ -230,9 +214,10 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello',
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello',
+                }
             })
         "#,
       )
@@ -254,10 +239,11 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello',
-                mutable = true,
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello',
+                    mutable = true,
+                }
             })
         "#,
       )
@@ -282,10 +268,11 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello',
-                mutable = true,
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello',
+                    mutable = true,
+                }
             })
         "#,
       )
@@ -308,9 +295,10 @@ mod file_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello',
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello',
+                }
             })
         "#,
       )
@@ -336,10 +324,11 @@ mod file_module {
             local prio = require('syslua.priority')
 
             -- Default is immutable, but force mutable
-            syslua.modules.file.setup({
-                target = '/tmp/test.txt',
-                content = 'hello',
-                mutable = prio.force(true),
+            syslua.environment.files.setup({
+                ['/tmp/test.txt'] = {
+                    content = 'hello',
+                    mutable = prio.force(true),
+                }
             })
         "#,
       )
@@ -348,6 +337,81 @@ mod file_module {
     let m = manifest.borrow();
     assert_eq!(m.builds.len(), 0, "force mutable should skip build");
     assert_eq!(m.bindings.len(), 1, "force mutable should create bind only");
+    Ok(())
+  }
+
+  #[test]
+  fn multiple_setup_calls_create_multiple_files() -> LuaResult<()> {
+    let (lua, manifest) = create_test_runtime()?;
+
+    lua
+      .load(
+        r#"
+            local syslua = require('syslua')
+
+            syslua.environment.files.setup({
+                ['/tmp/file1.txt'] = {
+                    content = 'first file',
+                }
+            })
+
+            syslua.environment.files.setup({
+                ['/tmp/file2.txt'] = {
+                    content = 'second file',
+                }
+            })
+        "#,
+      )
+      .exec()?;
+
+    let m = manifest.borrow();
+    assert_eq!(m.builds.len(), 2, "two setup calls should create two builds");
+    assert_eq!(m.bindings.len(), 2, "two setup calls should create two binds");
+
+    let build_ids: Vec<_> = m.builds.values().filter_map(|b| b.id.as_ref()).collect();
+    assert!(
+      build_ids.contains(&&"file1.txt-file".to_string()),
+      "should have build for file1.txt"
+    );
+    assert!(
+      build_ids.contains(&&"file2.txt-file".to_string()),
+      "should have build for file2.txt"
+    );
+    Ok(())
+  }
+
+  #[test]
+  fn single_setup_with_multiple_files() -> LuaResult<()> {
+    let (lua, manifest) = create_test_runtime()?;
+
+    lua
+      .load(
+        r#"
+            local syslua = require('syslua')
+
+            syslua.environment.files.setup({
+                ['/tmp/config.json'] = {
+                    content = '{}',
+                },
+                ['/tmp/data.txt'] = {
+                    content = 'data',
+                    mutable = true,
+                }
+            })
+        "#,
+      )
+      .exec()?;
+
+    let m = manifest.borrow();
+    assert_eq!(m.builds.len(), 1, "only immutable file should create a build");
+    assert_eq!(m.bindings.len(), 2, "both files should create binds");
+
+    let build = m.builds.values().next().unwrap();
+    assert_eq!(
+      build.id,
+      Some("config.json-file".to_string()),
+      "immutable file should have build"
+    );
     Ok(())
   }
 }
@@ -364,7 +428,7 @@ mod env_module {
         r#"
             local syslua = require('syslua')
             local prio = require('syslua.priority')
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PATH = prio.before('/opt/bin'),
             })
         "#,
@@ -374,7 +438,7 @@ mod env_module {
     let m = manifest.borrow();
     assert_eq!(m.builds.len(), 1, "env should create a build");
     // On non-Windows, creates binds for zsh, bash, and fish (3 binds)
-    assert!(m.bindings.len() >= 1, "env should create at least one bind");
+    assert!(!m.bindings.is_empty(), "env should create at least one bind");
     Ok(())
   }
 
@@ -387,7 +451,7 @@ mod env_module {
         r#"
             local syslua = require('syslua')
             local prio = require('syslua.priority')
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 EDITOR = 'nvim',
                 GOPATH = prio.force('/go'),
             })
@@ -412,7 +476,7 @@ mod env_module {
             local prio = require('syslua.priority')
 
             -- First setup adds /opt/bin
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PATH = prio.before('/opt/bin'),
             })
         "#,
@@ -432,7 +496,7 @@ mod env_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.env.setup({})
+            syslua.environment.variables.setup({})
         "#,
       )
       .exec()?;
@@ -461,12 +525,12 @@ mod env_module {
             local prio = require('syslua.priority')
 
             -- First setup adds /opt/bin before default
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PATH = prio.before('/opt/bin'),
             })
 
             -- Second setup adds /custom/bin after default
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PATH = prio.after('/custom/bin'),
             })
         "#,
@@ -490,12 +554,12 @@ mod env_module {
             local prio = require('syslua.priority')
 
             -- First setup sets EDITOR
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 EDITOR = 'vim',
             })
 
             -- Second setup sets PAGER (different var, should merge)
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PAGER = 'less',
             })
         "#,
@@ -518,12 +582,12 @@ mod env_module {
             local prio = require('syslua.priority')
 
             -- First setup sets EDITOR
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 EDITOR = 'vim',
             })
 
             -- Second setup forces EDITOR to different value
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 EDITOR = prio.force('nvim'),
             })
         "#,
@@ -543,7 +607,7 @@ mod env_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 EDITOR = 'vim',
             })
         "#,
@@ -552,7 +616,7 @@ mod env_module {
 
     let m = manifest.borrow();
     assert_eq!(m.builds.len(), 1);
-    assert!(m.bindings.len() >= 1);
+    assert!(!m.bindings.is_empty());
 
     // Get the build hash
     let build_hash = m.builds.keys().next().unwrap();
@@ -582,14 +646,14 @@ mod env_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.env.setup({})
+            syslua.environment.variables.setup({})
         "#,
       )
       .exec()?;
 
     let m = manifest.borrow();
     assert_eq!(m.builds.len(), 1, "empty setup should still create build");
-    assert!(m.bindings.len() >= 1, "empty setup should create binds");
+    assert!(!m.bindings.is_empty(), "empty setup should create binds");
     Ok(())
   }
 
@@ -601,7 +665,7 @@ mod env_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PATH = '/usr/local/bin:/usr/bin',
             })
         "#,
@@ -623,7 +687,7 @@ mod env_module {
             local syslua = require('syslua')
             local prio = require('syslua.priority')
 
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 EDITOR = 'vim',                  -- plain string
                 PAGER = prio.default('less'),    -- default priority
                 SHELL = prio.force('/bin/zsh'),  -- force priority
@@ -645,7 +709,7 @@ mod env_module {
       .load(
         r#"
             local syslua = require('syslua')
-            syslua.modules.env.setup({})
+            syslua.environment.variables.setup({})
         "#,
       )
       .exec()?;
@@ -703,12 +767,12 @@ mod env_module {
             local syslua = require('syslua')
 
             -- First setup sets EDITOR
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 EDITOR = 'vim',
             })
 
             -- Second setup sets EDITOR to different value without priority
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 EDITOR = 'nano',
             })
         "#,
@@ -729,15 +793,15 @@ mod env_module {
             local syslua = require('syslua')
             local prio = require('syslua.priority')
 
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PATH = prio.before('/opt/first'),
             })
 
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PATH = prio.before('/opt/second'),
             })
 
-            syslua.modules.env.setup({
+            syslua.environment.variables.setup({
                 PATH = prio.after('/opt/last'),
             })
         "#,

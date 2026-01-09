@@ -31,11 +31,39 @@ impl TestEnv {
   /// Create from a fixture file.
   ///
   /// Copies the fixture content to a temporary `init.lua` file.
+  /// Creates a `syslua/` directory with symlinks to workspace lua/ and init.lua.
   pub fn from_fixture(name: &str) -> Self {
     let temp = TempDir::new().unwrap();
     let config_path = temp.path().join("init.lua");
     let content = fixture_content(name);
     std::fs::write(&config_path, content).unwrap();
+
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .parent()
+      .unwrap()
+      .parent()
+      .unwrap()
+      .to_path_buf();
+
+    let syslua_dir = temp.path().join("syslua");
+    std::fs::create_dir_all(&syslua_dir).unwrap();
+
+    let lua_src = workspace_root.join("lua");
+    let lua_dst = syslua_dir.join("lua");
+    let init_src = workspace_root.join("init.lua");
+    let init_dst = syslua_dir.join("init.lua");
+
+    #[cfg(unix)]
+    {
+      std::os::unix::fs::symlink(&lua_src, &lua_dst).unwrap();
+      std::os::unix::fs::symlink(&init_src, &init_dst).unwrap();
+    }
+    #[cfg(windows)]
+    {
+      std::os::windows::fs::symlink_dir(&lua_src, &lua_dst).unwrap();
+      std::os::windows::fs::symlink_file(&init_src, &init_dst).unwrap();
+    }
+
     Self { temp, config_path }
   }
 
