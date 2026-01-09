@@ -1,6 +1,6 @@
 return {
   inputs = {
-    syslua = 'path:./lua',
+    syslua = 'path:./syslua',
   },
   setup = function()
     local syslua = require('syslua')

@@ -29,7 +29,10 @@ setmetatable(M, {
 
 M.setup = function()
   local unix_path = '/bin:/usr/bin'
-  local win_path = (os.getenv('SystemDrive') or 'C:') .. '\\Windows\\System32;' .. (os.getenv('SystemDrive') or 'C:') .. '\\Windows'
+  local win_path = (os.getenv('SystemDrive') or 'C:')
+    .. '\\Windows\\System32;'
+    .. (os.getenv('SystemDrive') or 'C:')
+    .. '\\Windows'
 
   local function script_impl(ctx, format, content, opts)
     opts = opts or {}

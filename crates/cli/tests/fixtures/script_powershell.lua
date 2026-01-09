@@ -1,6 +1,6 @@
 return {
   inputs = {
-    syslua = 'path:./lua',
+    syslua = 'path:./syslua',
   },
   setup = function()
     require('syslua').setup()
@@ -8,9 +8,12 @@ return {
     sys.build({
       id = 'test-script-powershell',
       create = function(_inputs, ctx)
-        local result = ctx:script('powershell', [[
+        local result = ctx:script(
+          'powershell',
+          [[
 Write-Output "hello from powershell"
-]])
+]]
+        )
         return { out = ctx.out }
       end,
     })

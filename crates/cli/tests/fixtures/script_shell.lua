@@ -1,6 +1,6 @@
 return {
   inputs = {
-    syslua = 'path:./lua',
+    syslua = 'path:./syslua',
   },
   setup = function()
     require('syslua').setup()
@@ -8,10 +8,13 @@ return {
     sys.build({
       id = 'test-script-shell',
       create = function(_inputs, ctx)
-        local result = ctx:script('shell', [[
+        local result = ctx:script(
+          'shell',
+          [[
 echo "hello from script"
 echo "second line"
-]])
+]]
+        )
         return {
           out = ctx.out,
           captured = result.stdout,

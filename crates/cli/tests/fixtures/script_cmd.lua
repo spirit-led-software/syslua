@@ -1,6 +1,6 @@
 return {
   inputs = {
-    syslua = 'path:./lua',
+    syslua = 'path:./syslua',
   },
   setup = function()
     require('syslua').setup()
@@ -8,10 +8,13 @@ return {
     sys.build({
       id = 'test-script-cmd',
       create = function(_inputs, ctx)
-        local result = ctx:script('cmd', [[
+        local result = ctx:script(
+          'cmd',
+          [[
 @echo off
 echo hello from cmd
-]])
+]]
+        )
         return { out = ctx.out }
       end,
     })
