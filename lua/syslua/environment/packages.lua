@@ -55,7 +55,7 @@ local M = {}
 -- Constants
 -- ============================================================================
 
-local SYSLUA_DIR = lib.get_home() .. '/.syslua'
+-- local SYSLUA_DIR = lib.get_home() .. '/.syslua'
 
 -- Shell markers for shell integration
 local BEGIN_MARKER = '# BEGIN SYSLUA PACKAGES'
@@ -535,9 +535,8 @@ fi
       if inputs.link_opts.man then
         for _, man in ipairs(inputs.man_pages) do
           local man_section_dir = ctx.out .. '/share/man/man' .. man.section
-          if inputs.os == 'windows' then
-            -- Skip man pages on Windows
-          else
+          -- noop on Windows
+          if inputs.os ~= 'windows' then
             ctx:exec({
               bin = '/bin/sh',
               args = {
@@ -616,7 +615,6 @@ fi
   })
 end
 
----@param env_build table BuildRef from create_env_build
 ---@param env_build table BuildRef from create_env_build
 local function create_env_bind(env_build)
   local home = lib.get_home()
