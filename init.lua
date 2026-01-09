@@ -17,11 +17,8 @@ return {
         end
         local env_block = table.concat(env_lines, '\r\n')
 
-        local wrapper = string.format(
-          '@echo off\r\n%s\r\n"%%~dp0%s.real.exe" %%*',
-          env_block,
-          binary_name:gsub('%.exe$', '')
-        )
+        local wrapper =
+          string.format('@echo off\r\n%s\r\n"%%~dp0%s.real.exe" %%*', env_block, binary_name:gsub('%.exe$', ''))
 
         ctx:exec({
           bin = 'cmd.exe',
@@ -43,11 +40,7 @@ return {
         end
         local env_block = table.concat(env_lines, '\n')
 
-        local wrapper = string.format(
-          '#!/bin/sh\n%s\nexec "%s.real" "$@"',
-          env_block,
-          binary_path
-        )
+        local wrapper = string.format('#!/bin/sh\n%s\nexec "%s.real" "$@"', env_block, binary_path)
 
         ctx:exec({
           bin = '/bin/sh',

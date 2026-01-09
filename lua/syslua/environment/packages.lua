@@ -542,7 +542,13 @@ fi
               bin = '/bin/sh',
               args = {
                 '-c',
-                string.format('mkdir -p "%s" && ln -sf "%s" "%s/%s"', man_section_dir, man.source, man_section_dir, man.name),
+                string.format(
+                  'mkdir -p "%s" && ln -sf "%s" "%s/%s"',
+                  man_section_dir,
+                  man.source,
+                  man_section_dir,
+                  man.name
+                ),
               },
             })
           end
@@ -706,7 +712,16 @@ ln -s "%s" "%s.tmp.$$" && mv -f "%s.tmp.$$" "%s"
       else
         ctx:exec({
           bin = '/bin/sh',
-          args = { '-c', string.format('rm -f "%s" "%s" "%s" "%s"', outputs.bin_link, outputs.man_link, outputs.lib_link, outputs.include_link) },
+          args = {
+            '-c',
+            string.format(
+              'rm -f "%s" "%s" "%s" "%s"',
+              outputs.bin_link,
+              outputs.man_link,
+              outputs.lib_link,
+              outputs.include_link
+            ),
+          },
         })
       end
     end,
@@ -935,7 +950,7 @@ local function create_completion_binds(completions, link_opts)
     local target_dir = paths[comp.shell]
     if target_dir then
       local target_name = comp.name
-          if comp.shell == 'zsh' and not target_name:match('^_') then
+      if comp.shell == 'zsh' and not target_name:match('^_') then
         target_name = '_' .. target_name:gsub('%.zsh$', '')
       elseif comp.shell == 'fish' and not target_name:match('%.fish$') then
         target_name = target_name .. '.fish'
