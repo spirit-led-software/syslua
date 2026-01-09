@@ -189,6 +189,136 @@ local function windows_delete_user_script(name, home_dir, preserve_home)
 end
 
 -- ============================================================================
+-- User Config Execution
+-- ============================================================================
+
+---Get the store path for a user
+---@param home_dir string
+---@return string
+local function get_user_store(home_dir)
+  return home_dir .. '/.syslua/store'
+end
+
+---Get the parent store path (system store)
+---@return string
+local function get_parent_store()
+  -- Use the current store as parent for user subprocesses
+  local store = sys.getenv('SYSLUA_STORE')
+  if store and store ~= '' then
+    return store
+  end
+  -- Fallback to default system store
+  if sys.os == 'windows' then
+    local drive = sys.getenv('SYSTEMDRIVE') or 'C:'
+    return drive .. '\\syslua\\store'
+  else
+    return '/syslua/store'
+  end
+end
+
+---Resolve config path (file or directory with init.lua)
+---@param config_path string
+---@return string
+local function resolve_config_path(config_path)
+  -- If it's a directory, append init.lua
+  -- The actual check happens at runtime in the bind
+  if config_path:match('%.lua$') then
+    return config_path
+  else
+    return config_path .. '/init.lua'
+  end
+end
+
+---Build Unix command to run sys apply as user
+---@param username string
+---@param home_dir string
+---@param config_path string
+---@return string bin, string[] args
+local function unix_run_as_user_cmd(username, home_dir, config_path)
+  local user_store = get_user_store(home_dir)
+  local parent_store = get_parent_store()
+  local resolved_config = resolve_config_path(config_path)
+
+  local env_prefix = string.format('SYSLUA_STORE=%s SYSLUA_PARENT_STORE=%s', user_store, parent_store)
+
+  local cmd = string.format('%s sys apply %s', env_prefix, resolved_config)
+
+  return '/bin/su', { '-', username, '-c', cmd }
+end
+
+---Build Unix command to run sys destroy as user
+---@param username string
+---@param home_dir string
+---@return string bin, string[] args
+local function unix_destroy_as_user_cmd(username, home_dir)
+  local user_store = get_user_store(home_dir)
+  local parent_store = get_parent_store()
+
+  local env_prefix = string.format('SYSLUA_STORE=%s SYSLUA_PARENT_STORE=%s', user_store, parent_store)
+
+  local cmd = string.format('%s sys destroy', env_prefix)
+
+  return '/bin/su', { '-', username, '-c', cmd }
+end
+
+---Build Windows command to run sys apply as user (via scheduled task)
+---@param username string
+---@param home_dir string
+---@param config_path string
+---@return string
+local function windows_run_as_user_script(username, home_dir, config_path)
+  local user_store = get_user_store(home_dir):gsub('/', '\\')
+  local parent_store = get_parent_store():gsub('/', '\\')
+  local resolved_config = resolve_config_path(config_path):gsub('/', '\\')
+
+  return string.format(
+    [[
+$env:SYSLUA_STORE = "%s"
+$env:SYSLUA_PARENT_STORE = "%s"
+$taskName = "SysluaApply_%s"
+$action = New-ScheduledTaskAction -Execute "sys" -Argument "apply %s"
+$principal = New-ScheduledTaskPrincipal -UserId "%s" -LogonType Interactive
+Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
+Start-ScheduledTask -TaskName $taskName
+Start-Sleep -Seconds 2
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+]],
+    user_store,
+    parent_store,
+    username,
+    resolved_config,
+    username
+  )
+end
+
+---Build Windows command to run sys destroy as user
+---@param username string
+---@param home_dir string
+---@return string
+local function windows_destroy_as_user_script(username, home_dir)
+  local user_store = get_user_store(home_dir):gsub('/', '\\')
+  local parent_store = get_parent_store():gsub('/', '\\')
+
+  return string.format(
+    [[
+$env:SYSLUA_STORE = "%s"
+$env:SYSLUA_PARENT_STORE = "%s"
+$taskName = "SysluaDestroy_%s"
+$action = New-ScheduledTaskAction -Execute "sys" -Argument "destroy"
+$principal = New-ScheduledTaskPrincipal -UserId "%s" -LogonType Interactive
+Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
+Start-ScheduledTask -TaskName $taskName
+Start-Sleep -Seconds 2
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+]],
+    user_store,
+    parent_store,
+    username,
+    username
+  )
+end
+
+-- ============================================================================
 -- Validation
 -- ============================================================================
 
