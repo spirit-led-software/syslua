@@ -1,7 +1,8 @@
 ---@class syslua.pkgs.cli
 ---@field fd syslua.pkgs.cli.fd
----@field ripgrep syslua.pkgs.cli.ripgrep
 ---@field jq syslua.pkgs.cli.jq
+---@field patchelf syslua.pkgs.cli.patchelf
+---@field ripgrep syslua.pkgs.cli.ripgrep
 local M = {}
 
 setmetatable(M, {

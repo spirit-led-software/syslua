@@ -23,7 +23,7 @@ setmetatable(M, {
 
 ---@class BuildCtx
 ---@field wrap_binary fun(self: BuildCtx, opts: {binary: string, env?: table<string,string>}): nil
----@field patch_rpath fun(self: BuildCtx, deps: BuildRef[]): nil
+---@field patch_rpath fun(self: BuildCtx, opts: {deps: BuildRef[], patchelf?: BuildRef}|BuildRef[]): nil
 ---@field patch_shebang fun(self: BuildCtx, interpreter: string): nil
 ---@field script fun(self: BuildCtx, format: string, content: string, opts?: {name?: string}): {stdout: string, path: string}
 
@@ -166,10 +166,13 @@ M.setup = function()
     end
   end)
 
-  sys.register_build_ctx_method('patch_rpath', function(ctx, deps)
+  sys.register_build_ctx_method('patch_rpath', function(ctx, opts)
     if sys.os == 'windows' then
       return
     end
+
+    local deps = opts.deps or opts
+    local patchelf_bin = opts.patchelf and opts.patchelf.outputs.bin or nil
 
     local rpath_entries = {}
     for _, dep in pairs(deps) do
@@ -184,10 +187,26 @@ M.setup = function()
 
     if sys.os == 'linux' then
       local rpath = table.concat(rpath_entries, ':')
-      ctx:script(
-        'shell',
-        string.format(
-          [[
+      if patchelf_bin then
+        ctx:script(
+          'shell',
+          string.format(
+            [[
+find "%s" -type f -executable | while read f; do
+  "%s" --set-rpath "%s" "$f" 2>/dev/null || true
+done
+]],
+            ctx.out,
+            patchelf_bin,
+            rpath
+          ),
+          { name = 'patch_rpath' }
+        )
+      else
+        ctx:script(
+          'shell',
+          string.format(
+            [[
 if ! command -v patchelf >/dev/null 2>&1; then
   echo "WARNING: patchelf not found. Install patchelf to enable RPATH patching." >&2
   echo "         Binaries may fail to find their library dependencies at runtime." >&2
@@ -197,11 +216,12 @@ find "%s" -type f -executable | while read f; do
   patchelf --set-rpath "%s" "$f" 2>/dev/null || true
 done
 ]],
-          ctx.out,
-          rpath
-        ),
-        { name = 'patch_rpath' }
-      )
+            ctx.out,
+            rpath
+          ),
+          { name = 'patch_rpath' }
+        )
+      end
     elseif sys.os == 'darwin' then
       local install_cmds = {}
       for _, p in ipairs(rpath_entries) do
