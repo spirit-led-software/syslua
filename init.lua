@@ -150,6 +150,9 @@ done]],
       })
     end)
 
+    -- Track script counts per-context using a weak table (ctx is userdata, can't store properties on it)
+    local script_counts = setmetatable({}, { __mode = 'k' })
+
     --- Write a script file and execute it.
     ---
     --- Writes the script content to $out/tmp/<name>.<ext> and executes it with
@@ -165,9 +168,9 @@ done]],
     local function script_impl(ctx, format, content, opts)
       opts = opts or {}
 
-      -- Track script count for default naming (store on ctx table)
-      ctx._script_count = (ctx._script_count or 0) + 1
-      local name = opts.name or ('script_' .. (ctx._script_count - 1))
+      -- Track script count for default naming (use weak table since ctx is userdata)
+      script_counts[ctx] = (script_counts[ctx] or 0) + 1
+      local name = opts.name or ('script_' .. (script_counts[ctx] - 1))
 
       -- Determine extension and interpreter based on format
       local ext, bin, args_prefix
