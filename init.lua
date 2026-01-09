@@ -150,7 +150,18 @@ done]],
       })
     end)
 
-    -- Script method implementation (shared by build and bind contexts)
+    --- Write a script file and execute it.
+    ---
+    --- Writes the script content to $out/tmp/<name>.<ext> and executes it with
+    --- the appropriate interpreter. Script files are kept after execution for
+    --- debugging.
+    ---
+    --- @param ctx table The build or bind context
+    --- @param format string Script format: 'shell', 'bash', 'powershell', or 'cmd'
+    --- @param content string Script content (written verbatim)
+    --- @param opts? table Optional settings
+    --- @param opts.name? string Script filename without extension (default: script_N)
+    --- @return table result { stdout: placeholder string, path: script file path }
     local function script_impl(ctx, format, content, opts)
       opts = opts or {}
 
