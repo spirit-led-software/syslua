@@ -17,6 +17,11 @@ M.releases = {
       sha256 = 'ae13e2effe077e829be759182396b931d8f85cfb9cfe9d49385516ea367ef7b2',
       format = 'tar.gz',
     },
+    ['x86_64-windows'] = {
+      url = 'https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-win64-0.18.0.exe',
+      sha256 = 'ea5293833b6a547612ce4b073ac84fd603011ce3455f488a1017fabc8bd170ff',
+      format = 'binary',
+    },
   },
 }
 
@@ -80,13 +85,36 @@ function M.setup(provided_opts)
     )
   end
 
-  local archive = lib.fetch_url({
+  local downloaded = lib.fetch_url({
     url = platform_release.url,
     sha256 = platform_release.sha256,
   })
 
+  if platform_release.format == 'binary' then
+    return sys.build({
+      inputs = {
+        downloaded = downloaded,
+      },
+      create = function(inputs, ctx)
+        local src = inputs.downloaded.outputs.out
+        local bin_name = 'patchelf.exe'
+        local bin_path = sys.path.join(ctx.out, bin_name)
+
+        ctx:exec({
+          bin = 'cmd.exe',
+          args = { '/c', string.format('copy "%s" "%s"', src, bin_path) },
+        })
+
+        return {
+          bin = bin_path,
+          out = ctx.out,
+        }
+      end,
+    })
+  end
+
   local extracted = lib.extract({
-    archive = archive.outputs.out,
+    archive = downloaded.outputs.out,
     format = platform_release.format,
     strip_components = 0,
   })
