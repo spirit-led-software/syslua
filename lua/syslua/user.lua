@@ -101,6 +101,14 @@ local function darwin_create_user_cmd(name, opts)
   return '/usr/sbin/sysadminctl', args
 end
 
+---Add user to group on macOS
+---@param username string
+---@param group string
+---@return string bin, string[] args
+local function darwin_add_to_group_cmd(username, group)
+  return '/usr/sbin/dseditgroup', { '-o', 'edit', '-a', username, '-t', 'user', group }
+end
+
 ---Build Windows user creation PowerShell script
 ---@param name string
 ---@param opts syslua.user.Options
