@@ -319,6 +319,31 @@ Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
 end
 
 -- ============================================================================
+-- User Existence Checks
+-- ============================================================================
+
+---Check if user exists on Linux
+---@param username string
+---@return string
+local function linux_user_exists_check(username)
+  return string.format('id "%s" >/dev/null 2>&1', username)
+end
+
+---Check if user exists on macOS
+---@param username string
+---@return string
+local function darwin_user_exists_check(username)
+  return string.format('dscl . -read /Users/%s >/dev/null 2>&1', username)
+end
+
+---Check if user exists on Windows (PowerShell)
+---@param username string
+---@return string
+local function windows_user_exists_check(username)
+  return string.format('if (-not (Get-LocalUser -Name "%s" -ErrorAction SilentlyContinue)) { exit 1 }', username)
+end
+
+-- ============================================================================
 -- Validation
 -- ============================================================================
 
