@@ -4,6 +4,7 @@
 
 pub mod arch;
 pub mod immutable;
+pub mod link;
 pub mod os;
 pub mod paths;
 
