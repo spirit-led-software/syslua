@@ -16,6 +16,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use mlua::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use sha2::Digest;
 
 use crate::{
@@ -243,7 +244,7 @@ pub struct BindDef {
   /// Resolved inputs (with BuildRef/BindRef converted to hashes).
   pub inputs: Option<BindInputsDef>,
   /// Named outputs from the binding (e.g., `{"path": "$${{action:0}}"}`).
-  pub outputs: Option<BTreeMap<String, String>>,
+  pub outputs: Option<BTreeMap<String, JsonValue>>,
   /// The sequence of actions to execute during `create`.
   pub create_actions: Vec<Action>,
   /// Actions to execute during `update`.
@@ -266,7 +267,7 @@ impl Hashable for BindDef {
     struct BindDefHashable<'a> {
       id: &'a Option<String>,
       inputs: &'a Option<BindInputsDef>,
-      outputs: &'a Option<BTreeMap<String, String>>,
+      outputs: &'a Option<BTreeMap<String, JsonValue>>,
       create_actions: &'a Vec<Action>,
       update_actions: &'a Option<Vec<Action>>,
       destroy_actions: &'a Vec<Action>,
@@ -309,7 +310,7 @@ impl BindDef {
     let create_result: LuaValue = spec.create.call((&inputs_arg, &create_ctx_userdata))?;
 
     // Extract outputs from create return value (optional for binds)
-    let outputs: Option<BTreeMap<String, String>> = match create_result {
+    let outputs: Option<BTreeMap<String, JsonValue>> = match create_result {
       LuaValue::Table(t) => {
         let parsed = parse_outputs(t)?;
         if parsed.is_empty() { None } else { Some(parsed) }
@@ -499,7 +500,7 @@ pub const BIND_REF_TYPE: &str = "BindRef";
 
 pub struct BindRef {
   pub hash: ObjectHash,
-  pub outputs: Option<BTreeMap<String, String>>,
+  pub outputs: Option<BTreeMap<String, JsonValue>>,
 }
 
 impl BindRef {
@@ -679,7 +680,10 @@ mod tests {
       let def = BindDef {
         id: Some("test-bind".to_string()),
         inputs: Some(BindInputsDef::String("test".to_string())),
-        outputs: Some(BTreeMap::from([("link".to_string(), "$${{action:0}}".to_string())])),
+        outputs: Some(BTreeMap::from([(
+          "link".to_string(),
+          JsonValue::String("$${{action:0}}".to_string()),
+        )])),
         create_actions: vec![Action::Exec(ExecOpts {
           bin: "ln -s /src /dest".to_string(),
           args: None,

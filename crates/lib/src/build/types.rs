@@ -13,6 +13,7 @@ use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 use mlua::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::{
   action::{Action, ActionCtx, actions::exec::ExecOpts},
@@ -195,7 +196,7 @@ pub struct BuildDef {
   /// Resolved inputs (with BuildRef/BindRef converted to hashes).
   pub inputs: Option<BuildInputs>,
   /// Named outputs from the build (e.g., `{"out": "$${{action:2}}", "bin": "..."}`).
-  pub outputs: Option<BTreeMap<String, String>>,
+  pub outputs: Option<BTreeMap<String, JsonValue>>,
   /// The sequence of actions to execute during `create`.
   pub create_actions: Vec<Action>,
 }
@@ -209,7 +210,7 @@ impl BuildDef {
     spec: BuildSpec,
     lua_value_to_def: impl Fn(LuaValue, &Manifest) -> LuaResult<BuildInputs>,
     inputs_def_to_lua: impl Fn(&Lua, &BuildInputs, &Manifest) -> LuaResult<LuaValue>,
-    parse_outputs: impl Fn(LuaTable) -> LuaResult<BTreeMap<String, String>>,
+    parse_outputs: impl Fn(LuaTable) -> LuaResult<BTreeMap<String, JsonValue>>,
   ) -> LuaResult<Self> {
     let inputs = match spec.inputs {
       Some(input_spec) => BuildInputs::from_spec(manifest, input_spec, &lua_value_to_def)?,
@@ -226,7 +227,7 @@ impl BuildDef {
 
     let result: LuaValue = spec.create.call((inputs_arg, &ctx_userdata))?;
 
-    let outputs: BTreeMap<String, String> = match result {
+    let outputs: BTreeMap<String, JsonValue> = match result {
       LuaValue::Table(t) => {
         let parsed = parse_outputs(t)?;
         if parsed.is_empty() {
@@ -314,7 +315,7 @@ pub struct BuildRef {
   /// The content-addressed hash of the build definition.
   pub hash: ObjectHash,
   /// Named outputs from the build (keys only, values become placeholders).
-  pub outputs: BTreeMap<String, String>,
+  pub outputs: BTreeMap<String, JsonValue>,
 }
 
 impl BuildRef {
@@ -495,7 +496,10 @@ mod tests {
             cwd: Some("/build".to_string()),
           }),
         ],
-        outputs: Some(BTreeMap::from([("out".to_string(), "$${{action:1}}".to_string())])),
+        outputs: Some(BTreeMap::from([(
+          "out".to_string(),
+          JsonValue::String("$${{action:1}}".to_string()),
+        )])),
       };
 
       let json = serde_json::to_string(&def).unwrap();

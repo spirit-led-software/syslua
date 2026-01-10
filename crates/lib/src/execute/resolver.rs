@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use serde_json::Value as JsonValue;
+
 use crate::build::store::build_dir_path;
 use crate::manifest::Manifest;
 use crate::placeholder::{PlaceholderError, Resolver};
@@ -161,7 +163,14 @@ impl Resolver for BindCtxResolver<'_> {
     {
       // Look up the output in the resolved outputs
       if let Some(value) = result.outputs.get(output) {
-        return Ok(value);
+        // Only string values can be used in placeholders
+        return match value {
+          JsonValue::String(s) => Ok(s.as_str()),
+          _ => Err(PlaceholderError::UnresolvedBind {
+            hash: format!("{} (output '{}' is not a string)", hash, output),
+            output: output.to_string(),
+          }),
+        };
       }
     }
 
@@ -200,7 +209,14 @@ fn resolve_build_output<'a>(
   {
     // Look up the output in the resolved outputs
     if let Some(value) = result.outputs.get(output) {
-      return Ok(value);
+      // Only string values can be used in placeholders
+      return match value {
+        JsonValue::String(s) => Ok(s.as_str()),
+        _ => Err(PlaceholderError::UnresolvedBuild {
+          hash: format!("{} (output '{}' is not a string)", hash, output),
+          output: output.to_string(),
+        }),
+      };
     }
 
     // Special case: "out" refers to the store path
@@ -285,7 +301,7 @@ mod tests {
   fn build_ctx_resolve_build_from_completed() {
     let hash = ObjectHash("abc123def456".to_string());
     let mut outputs = HashMap::new();
-    outputs.insert("bin".to_string(), "/store/obj/test/bin".to_string());
+    outputs.insert("bin".to_string(), JsonValue::String("/store/obj/test/bin".to_string()));
 
     let result = BuildResult {
       store_path: PathBuf::from("/store/obj/test"),
@@ -353,7 +369,7 @@ mod tests {
   fn bind_ctx_resolve_build() {
     let build_hash = ObjectHash("build123".to_string());
     let mut build_outputs = HashMap::new();
-    build_outputs.insert("bin".to_string(), "/store/obj/app/bin".to_string());
+    build_outputs.insert("bin".to_string(), JsonValue::String("/store/obj/app/bin".to_string()));
 
     let build_result = BuildResult {
       store_path: PathBuf::from("/store/obj/app"),
@@ -377,7 +393,10 @@ mod tests {
   fn bind_ctx_resolve_bind() {
     let bind_hash = ObjectHash("bind456".to_string());
     let mut bind_outputs = HashMap::new();
-    bind_outputs.insert("link".to_string(), "/home/user/.config/app".to_string());
+    bind_outputs.insert(
+      "link".to_string(),
+      JsonValue::String("/home/user/.config/app".to_string()),
+    );
 
     let bind_result = BindResult {
       outputs: bind_outputs,
@@ -402,7 +421,7 @@ mod tests {
   fn bind_ctx_resolve_bind_by_prefix() {
     let bind_hash = ObjectHash("bind456def789".to_string());
     let mut bind_outputs = HashMap::new();
-    bind_outputs.insert("path".to_string(), "/some/path".to_string());
+    bind_outputs.insert("path".to_string(), JsonValue::String("/some/path".to_string()));
 
     let bind_result = BindResult {
       outputs: bind_outputs,

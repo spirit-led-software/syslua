@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde_json::Value as JsonValue;
 use thiserror::Error;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -951,13 +952,20 @@ fn build_restore_resolver_data(manifest: &Manifest) -> Result<RestoreResolverDat
     let mut outputs = HashMap::new();
     if let Some(def_outputs) = &build_def.outputs {
       for (name, pattern) in def_outputs {
-        // Simple substitution of $${{out}} with store_path
-        let resolved = pattern.replace("$${{out}}", store_path.to_string_lossy().as_ref());
+        // Simple substitution of $${{out}} with store_path (only for string values)
+        let resolved = match pattern {
+          JsonValue::String(s) => JsonValue::String(s.replace("$${{out}}", store_path.to_string_lossy().as_ref())),
+          // Non-string values pass through unchanged
+          other => other.clone(),
+        };
         outputs.insert(name.clone(), resolved);
       }
     }
     // Always add "out" pointing to store path
-    outputs.insert("out".to_string(), store_path.to_string_lossy().to_string());
+    outputs.insert(
+      "out".to_string(),
+      JsonValue::String(store_path.to_string_lossy().to_string()),
+    );
 
     builds.insert(
       hash.clone(),
@@ -1266,7 +1274,7 @@ mod tests {
 
       // Create bind state files
       let mut outputs = HashMap::new();
-      outputs.insert("link".to_string(), "/test/path".to_string());
+      outputs.insert("link".to_string(), JsonValue::String("/test/path".to_string()));
       let state = BindState::new(outputs);
 
       save_bind_state(&hash1, &state).unwrap();
@@ -1338,7 +1346,10 @@ mod tests {
 
       // Create a bind state file
       let mut outputs = HashMap::new();
-      outputs.insert("link".to_string(), "/home/user/.config/test".to_string());
+      outputs.insert(
+        "link".to_string(),
+        JsonValue::String("/home/user/.config/test".to_string()),
+      );
       let state = BindState::new(outputs.clone());
       save_bind_state(&hash, &state).unwrap();
 
@@ -1556,7 +1567,11 @@ mod tests {
       let new_hash = ObjectHash("new_bind".to_string());
 
       // Create old state but no new bind in manifest
-      let state = BindState::new([("path".to_string(), "/old/path".to_string())].into_iter().collect());
+      let state = BindState::new(
+        [("path".to_string(), JsonValue::String("/old/path".to_string()))]
+          .into_iter()
+          .collect(),
+      );
       save_bind_state(&old_hash, &state).unwrap();
 
       let manifest = Manifest::default(); // No bindings!

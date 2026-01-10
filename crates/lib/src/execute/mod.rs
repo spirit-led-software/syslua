@@ -602,6 +602,7 @@ mod tests {
       testutil::{echo_msg, shell_cmd},
     },
   };
+  use serde_json::Value as JsonValue;
   use std::collections::BTreeMap;
   use tempfile::TempDir;
 
@@ -971,7 +972,11 @@ mod tests {
           env: None,
           cwd: None,
         })],
-        outputs: Some([("bin".to_string(), "$${{out}}/bin".to_string())].into_iter().collect()),
+        outputs: Some(
+          [("bin".to_string(), JsonValue::String("$${{out}}/bin".to_string()))]
+            .into_iter()
+            .collect(),
+        ),
       };
       let build_hash = build.compute_hash().unwrap();
 
@@ -1009,7 +1014,8 @@ mod tests {
       // Verify the build output was resolved
       let build_result = &result.realized[&build_hash];
       assert!(build_result.outputs.contains_key("bin"));
-      assert!(build_result.outputs["bin"].ends_with("/bin"));
+      let bin_val = build_result.outputs["bin"].as_str().expect("bin should be string");
+      assert!(bin_val.ends_with("/bin"));
     });
   }
 
