@@ -28,6 +28,7 @@ use std::io;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use thiserror::Error;
 use tracing::{debug, warn};
 
@@ -38,11 +39,11 @@ const STATE_FILENAME: &str = "state.json";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BindState {
-  pub outputs: HashMap<String, String>,
+  pub outputs: HashMap<String, JsonValue>,
 }
 
 impl BindState {
-  pub fn new(outputs: HashMap<String, String>) -> Self {
+  pub fn new(outputs: HashMap<String, JsonValue>) -> Self {
     Self { outputs }
   }
 
@@ -199,8 +200,14 @@ mod tests {
     with_temp_store(|_| {
       let hash = ObjectHash("abc123def456789012345678".to_string());
       let mut outputs = HashMap::new();
-      outputs.insert("link".to_string(), "/home/user/.config/nvim".to_string());
-      outputs.insert("target".to_string(), "/store/obj/nvim-abc123".to_string());
+      outputs.insert(
+        "link".to_string(),
+        JsonValue::String("/home/user/.config/nvim".to_string()),
+      );
+      outputs.insert(
+        "target".to_string(),
+        JsonValue::String("/store/obj/nvim-abc123".to_string()),
+      );
 
       let state = BindState::new(outputs);
       save_bind_state(&hash, &state).unwrap();
@@ -328,18 +335,26 @@ mod tests {
 
   #[test]
   #[serial]
-  fn load_bind_state_handles_outputs_with_wrong_type() {
+  fn load_bind_state_handles_various_json_types() {
     with_temp_store(|_| {
-      let hash = ObjectHash("wrong_output_type12345".to_string());
+      let hash = ObjectHash("various_json_types12345".to_string());
 
       let state_path = test_bind_state_path(&hash);
       if let Some(parent) = state_path.parent() {
         std::fs::create_dir_all(parent).unwrap();
       }
-      std::fs::write(&state_path, r#"{"outputs": {"key": 12345}}"#).unwrap();
+      // Outputs can now be any JSON value (number, boolean, null, array, object, string)
+      std::fs::write(
+        &state_path,
+        r#"{"outputs": {"number": 12345, "bool": true, "null": null, "array": [1, 2], "object": {"nested": "value"}}}"#,
+      )
+      .unwrap();
 
-      let result = load_bind_state(&hash);
-      assert!(result.is_err());
+      let result = load_bind_state(&hash).unwrap().unwrap();
+      assert_eq!(result.outputs.len(), 5);
+      assert_eq!(result.outputs["number"], JsonValue::Number(12345.into()));
+      assert_eq!(result.outputs["bool"], JsonValue::Bool(true));
+      assert_eq!(result.outputs["null"], JsonValue::Null);
     });
   }
 }

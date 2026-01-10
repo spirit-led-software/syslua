@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use serde_json::Value as JsonValue;
 use thiserror::Error;
 
 use crate::placeholder::PlaceholderError;
@@ -120,7 +121,8 @@ pub struct BuildResult {
 
   /// Resolved outputs from the build (output name -> resolved value).
   /// These are the values from BuildDef.outputs with placeholders resolved.
-  pub outputs: HashMap<String, String>,
+  /// String values have their placeholders substituted; other JSON types are passed through.
+  pub outputs: HashMap<String, JsonValue>,
 
   /// Results of individual actions (for debugging/logging).
   pub action_results: Vec<ActionResult>,
@@ -131,7 +133,8 @@ pub struct BuildResult {
 pub struct BindResult {
   /// Resolved outputs from the bind (output name -> resolved value).
   /// These are the values from BindDef.outputs with placeholders resolved.
-  pub outputs: HashMap<String, String>,
+  /// String values have their placeholders substituted; other JSON types are passed through.
+  pub outputs: HashMap<String, JsonValue>,
 
   /// Results of individual actions (for debugging/logging).
   pub action_results: Vec<ActionResult>,

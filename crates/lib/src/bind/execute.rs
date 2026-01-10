@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use serde_json::Value as JsonValue;
 use tempfile::TempDir;
 use tracing::debug;
 
@@ -224,7 +225,7 @@ async fn execute_bind_actions(
   resolver: &mut BindCtxResolver<'_>,
   bind_def: &BindDef,
   out_dir: &Path,
-) -> Result<(Vec<ActionResult>, HashMap<String, String>), ExecuteError> {
+) -> Result<(Vec<ActionResult>, HashMap<String, JsonValue>), ExecuteError> {
   let mut action_results = Vec::new();
 
   for (idx, action) in actions.iter().enumerate() {
@@ -264,15 +265,25 @@ async fn execute_bind_actions_raw(
 }
 
 /// Resolve the outputs from a bind definition.
+///
+/// For string values, placeholders are resolved. For other JSON types
+/// (numbers, booleans, arrays, objects, null), values pass through unchanged.
 fn resolve_bind_outputs(
   bind_def: &BindDef,
   resolver: &BindCtxResolver<'_>,
-) -> Result<HashMap<String, String>, ExecuteError> {
+) -> Result<HashMap<String, JsonValue>, ExecuteError> {
   let mut outputs = HashMap::new();
 
   if let Some(def_outputs) = &bind_def.outputs {
     for (name, value) in def_outputs {
-      let resolved = placeholder::substitute(value, resolver)?;
+      let resolved = match value {
+        JsonValue::String(s) => {
+          // String values may contain placeholders - resolve them
+          JsonValue::String(placeholder::substitute(s, resolver)?)
+        }
+        // Non-string values pass through unchanged
+        other => other.clone(),
+      };
       outputs.insert(name.clone(), resolved);
     }
   }
@@ -338,7 +349,7 @@ mod tests {
       id: None,
       inputs: None,
       outputs: Some(
-        [("link".to_string(), "$${{action:0}}".to_string())]
+        [("link".to_string(), JsonValue::String("$${{action:0}}".to_string()))]
           .into_iter()
           .collect(),
       ),
@@ -359,7 +370,7 @@ mod tests {
 
     let result = apply_bind(&hash, &bind_def, &resolver).await.unwrap();
 
-    assert_eq!(result.outputs["link"], "/path/to/link");
+    assert_eq!(result.outputs["link"], JsonValue::String("/path/to/link".to_string()));
   }
 
   #[tokio::test]
@@ -368,7 +379,11 @@ mod tests {
     let bind_def = BindDef {
       id: None,
       inputs: None,
-      outputs: Some([("dir".to_string(), "$${{out}}".to_string())].into_iter().collect()),
+      outputs: Some(
+        [("dir".to_string(), JsonValue::String("$${{out}}".to_string()))]
+          .into_iter()
+          .collect(),
+      ),
       create_actions: vec![Action::Exec(ExecOpts {
         bin: cmd.to_string(),
         args: Some(args),
@@ -386,8 +401,11 @@ mod tests {
 
     let result = apply_bind(&hash, &bind_def, &resolver).await.unwrap();
 
-    // The output should be a temp directory path
-    assert!(!result.outputs["dir"].is_empty());
+    // The output should be a temp directory path (a non-empty string)
+    match &result.outputs["dir"] {
+      JsonValue::String(s) => assert!(!s.is_empty()),
+      _ => panic!("Expected string output"),
+    }
     // Check path looks reasonable: starts with / (Unix) or has drive letter (Windows)
     let output = &result.action_results[0].output;
     assert!(
@@ -420,7 +438,7 @@ mod tests {
     let hash = bind_def.compute_hash().unwrap();
 
     let mut build_outputs = HashMap::new();
-    build_outputs.insert("bin".to_string(), "/store/obj/myapp/bin".to_string());
+    build_outputs.insert("bin".to_string(), JsonValue::String("/store/obj/myapp/bin".to_string()));
     let build_result = BuildResult {
       store_path: PathBuf::from("/store/obj/myapp"),
       outputs: build_outputs,
@@ -445,7 +463,7 @@ mod tests {
       id: None,
       inputs: None,
       outputs: Some(
-        [("path".to_string(), "/created/path".to_string())]
+        [("path".to_string(), JsonValue::String("/created/path".to_string()))]
           .into_iter()
           .collect(),
       ),
@@ -531,7 +549,7 @@ mod tests {
       id: None,
       inputs: None,
       outputs: Some(
-        [("combined".to_string(), "$${{action:2}}".to_string())]
+        [("combined".to_string(), JsonValue::String("$${{action:2}}".to_string()))]
           .into_iter()
           .collect(),
       ),
@@ -570,7 +588,7 @@ mod tests {
     assert_eq!(result.action_results[0].output, "step1");
     assert_eq!(result.action_results[1].output, "step2");
     assert_eq!(result.action_results[2].output, "step1 step2");
-    assert_eq!(result.outputs["combined"], "step1 step2");
+    assert_eq!(result.outputs["combined"], JsonValue::String("step1 step2".to_string()));
   }
 
   #[tokio::test]
@@ -581,7 +599,7 @@ mod tests {
       id: Some("test-bind".to_string()),
       inputs: None,
       outputs: Some(
-        [("status".to_string(), "$${{action:0}}".to_string())]
+        [("status".to_string(), JsonValue::String("$${{action:0}}".to_string()))]
           .into_iter()
           .collect(),
       ),
@@ -608,7 +626,9 @@ mod tests {
 
     // Simulate previous apply result
     let old_bind_result = BindResult {
-      outputs: [("status".to_string(), "created".to_string())].into_iter().collect(),
+      outputs: [("status".to_string(), JsonValue::String("created".to_string()))]
+        .into_iter()
+        .collect(),
       action_results: vec![],
     };
 
@@ -619,7 +639,7 @@ mod tests {
     // Should have executed the update action
     assert_eq!(result.action_results.len(), 1);
     assert_eq!(result.action_results[0].output, "updated");
-    assert_eq!(result.outputs["status"], "updated");
+    assert_eq!(result.outputs["status"], JsonValue::String("updated".to_string()));
   }
 
   #[tokio::test]
@@ -630,7 +650,7 @@ mod tests {
       id: Some("path-bind".to_string()),
       inputs: None,
       outputs: Some(
-        [("path".to_string(), "$${{action:0}}".to_string())]
+        [("path".to_string(), JsonValue::String("$${{action:0}}".to_string()))]
           .into_iter()
           .collect(),
       ),
@@ -656,7 +676,9 @@ mod tests {
     let resolver = BindCtxResolver::new(&builds, &binds, &manifest, "/tmp".to_string());
 
     let old_bind_result = BindResult {
-      outputs: [("path".to_string(), "/old/path".to_string())].into_iter().collect(),
+      outputs: [("path".to_string(), JsonValue::String("/old/path".to_string()))]
+        .into_iter()
+        .collect(),
       action_results: vec![],
     };
 
@@ -665,7 +687,7 @@ mod tests {
       .unwrap();
 
     // New outputs should reflect the update action
-    assert_eq!(result.outputs["path"], "/new/path");
+    assert_eq!(result.outputs["path"], JsonValue::String("/new/path".to_string()));
   }
 
   #[tokio::test]
@@ -710,7 +732,7 @@ mod tests {
       id: Some("multi-step-update".to_string()),
       inputs: None,
       outputs: Some(
-        [("result".to_string(), "$${{action:2}}".to_string())]
+        [("result".to_string(), JsonValue::String("$${{action:2}}".to_string()))]
           .into_iter()
           .collect(),
       ),
@@ -750,7 +772,9 @@ mod tests {
     let resolver = BindCtxResolver::new(&builds, &binds, &manifest, "/tmp".to_string());
 
     let old_bind_result = BindResult {
-      outputs: [("result".to_string(), "old-result".to_string())].into_iter().collect(),
+      outputs: [("result".to_string(), JsonValue::String("old-result".to_string()))]
+        .into_iter()
+        .collect(),
       action_results: vec![],
     };
 
@@ -759,7 +783,7 @@ mod tests {
       .unwrap();
 
     assert_eq!(result.action_results.len(), 3);
-    assert_eq!(result.outputs["result"], "step1-step2");
+    assert_eq!(result.outputs["result"], JsonValue::String("step1-step2".to_string()));
   }
 
   // ============ check_bind tests ============

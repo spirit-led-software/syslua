@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use tokio::fs;
 use tracing::{debug, warn};
 
@@ -345,7 +346,8 @@ pub async fn realize_build_with_resolver(
 
 /// Resolve the outputs from a build definition.
 ///
-/// This substitutes placeholders in the output values with actual paths.
+/// This substitutes placeholders in string output values with actual paths.
+/// Non-string JSON values (numbers, booleans, arrays, objects, null) pass through unchanged.
 fn resolve_outputs(
   build_def: &BuildDef,
   store_path: &Path,
@@ -353,11 +355,14 @@ fn resolve_outputs(
   completed_builds: &HashMap<ObjectHash, BuildResult>,
   manifest: &Manifest,
   _config: &ExecuteConfig,
-) -> Result<HashMap<String, String>, ExecuteError> {
+) -> Result<HashMap<String, JsonValue>, ExecuteError> {
   let mut outputs = HashMap::new();
 
   // Always include "out" pointing to the store path
-  outputs.insert("out".to_string(), store_path.to_string_lossy().to_string());
+  outputs.insert(
+    "out".to_string(),
+    JsonValue::String(store_path.to_string_lossy().to_string()),
+  );
 
   // Resolve user-defined outputs
   if let Some(def_outputs) = &build_def.outputs {
@@ -368,7 +373,14 @@ fn resolve_outputs(
     }
 
     for (name, value) in def_outputs {
-      let resolved = placeholder::substitute(value, &resolver)?;
+      let resolved = match value {
+        JsonValue::String(s) => {
+          // String values may contain placeholders - resolve them
+          JsonValue::String(placeholder::substitute(s, &resolver)?)
+        }
+        // Non-string values pass through unchanged
+        other => other.clone(),
+      };
       outputs.insert(name.clone(), resolved);
     }
   }
@@ -389,13 +401,16 @@ fn resolve_outputs_with_resolver(
   completed_binds: &HashMap<ObjectHash, BindResult>,
   manifest: &Manifest,
   _config: &ExecuteConfig,
-) -> Result<HashMap<String, String>, ExecuteError> {
+) -> Result<HashMap<String, JsonValue>, ExecuteError> {
   let _ = completed_binds; // Unused - builds cannot reference binds
 
   let mut outputs = HashMap::new();
 
   // Always include "out" pointing to the store path
-  outputs.insert("out".to_string(), store_path.to_string_lossy().to_string());
+  outputs.insert(
+    "out".to_string(),
+    JsonValue::String(store_path.to_string_lossy().to_string()),
+  );
 
   // Resolve user-defined outputs
   if let Some(def_outputs) = &build_def.outputs {
@@ -406,7 +421,14 @@ fn resolve_outputs_with_resolver(
     }
 
     for (name, value) in def_outputs {
-      let resolved = placeholder::substitute(value, &resolver)?;
+      let resolved = match value {
+        JsonValue::String(s) => {
+          // String values may contain placeholders - resolve them
+          JsonValue::String(placeholder::substitute(s, &resolver)?)
+        }
+        // Non-string values pass through unchanged
+        other => other.clone(),
+      };
       outputs.insert(name.clone(), resolved);
     }
   }
@@ -485,7 +507,10 @@ mod tests {
 
       // Check that "out" output is set
       assert!(result.outputs.contains_key("out"));
-      assert_eq!(result.outputs["out"], result.store_path.to_string_lossy());
+      assert_eq!(
+        result.outputs["out"],
+        JsonValue::String(result.store_path.to_string_lossy().to_string())
+      );
 
       // Check action was executed
       assert_eq!(result.action_results.len(), 1);
@@ -508,8 +533,8 @@ mod tests {
         })],
         outputs: Some(
           [
-            ("bin".to_string(), "$${{action:0}}".to_string()),
-            ("lib".to_string(), "$${{out}}/lib".to_string()),
+            ("bin".to_string(), JsonValue::String("$${{action:0}}".to_string())),
+            ("lib".to_string(), JsonValue::String("$${{out}}/lib".to_string())),
           ]
           .into_iter()
           .collect(),
@@ -530,8 +555,9 @@ mod tests {
         .unwrap();
 
       // Check custom outputs
-      assert_eq!(result.outputs["bin"], "/path/to/binary");
-      assert!(result.outputs["lib"].ends_with("/lib"));
+      assert_eq!(result.outputs["bin"], JsonValue::String("/path/to/binary".to_string()));
+      let lib_val = result.outputs["lib"].as_str().expect("lib should be string");
+      assert!(lib_val.ends_with("/lib"));
     });
   }
 
@@ -566,7 +592,7 @@ mod tests {
           }),
         ],
         outputs: Some(
-          [("combined".to_string(), "$${{action:2}}".to_string())]
+          [("combined".to_string(), JsonValue::String("$${{action:2}}".to_string()))]
             .into_iter()
             .collect(),
         ),
@@ -589,7 +615,7 @@ mod tests {
       assert_eq!(result.action_results[0].output, "step1");
       assert_eq!(result.action_results[1].output, "step2");
       assert_eq!(result.action_results[2].output, "step1 step2");
-      assert_eq!(result.outputs["combined"], "step1 step2");
+      assert_eq!(result.outputs["combined"], JsonValue::String("step1 step2".to_string()));
     });
   }
 
