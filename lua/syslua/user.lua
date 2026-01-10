@@ -387,7 +387,16 @@ $principal = New-ScheduledTaskPrincipal -UserId "{{username}}" -LogonType Intera
 try {
   Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
   Start-ScheduledTask -TaskName $taskName
-  Start-Sleep -Seconds 2
+  $timeout = 300
+  $elapsed = 0
+  while (($task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) -and $task.State -eq 'Running' -and $elapsed -lt $timeout) {
+    Start-Sleep -Seconds 1
+    $elapsed++
+  }
+  $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+  if ($info -and $info.LastTaskResult -ne 0) {
+    throw "sys apply failed with exit code $($info.LastTaskResult)"
+  }
 } finally {
   Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
@@ -414,7 +423,16 @@ $principal = New-ScheduledTaskPrincipal -UserId "{{username}}" -LogonType Intera
 try {
   Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
   Start-ScheduledTask -TaskName $taskName
-  Start-Sleep -Seconds 2
+  $timeout = 300
+  $elapsed = 0
+  while (($task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) -and $task.State -eq 'Running' -and $elapsed -lt $timeout) {
+    Start-Sleep -Seconds 1
+    $elapsed++
+  }
+  $info = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+  if ($info -and $info.LastTaskResult -ne 0) {
+    throw "sys destroy failed with exit code $($info.LastTaskResult)"
+  }
 } finally {
   Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 }
