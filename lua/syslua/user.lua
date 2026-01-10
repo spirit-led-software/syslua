@@ -470,64 +470,83 @@ end
 -- Validation Helpers
 -- ============================================================================
 
----Check if a group exists on Linux
----@param group string
----@return boolean
-local function linux_group_exists(group)
-  local handle =
-    io.popen(interpolate('getent group "{{group}}" >/dev/null 2>&1 && echo yes || echo no', { group = group }))
+---Get all existing groups on Linux (batch operation)
+---@return table<string, boolean>
+local function linux_get_all_groups()
+  local handle = io.popen('getent group | cut -d: -f1')
   if not handle then
-    return false
+    return {}
   end
-  local result = handle:read('*a'):gsub('%s+', '')
+  local existing = {}
+  for line in handle:lines() do
+    existing[line] = true
+  end
   handle:close()
-  return result == 'yes'
+  return existing
 end
 
----Check if a group exists on macOS
----@param group string
----@return boolean
-local function darwin_group_exists(group)
-  local handle =
-    io.popen(interpolate('dscl . -read /Groups/{{group}} >/dev/null 2>&1 && echo yes || echo no', { group = group }))
+---Get all existing groups on macOS (batch operation)
+---@return table<string, boolean>
+local function darwin_get_all_groups()
+  local handle = io.popen('dscl . -list /Groups')
   if not handle then
-    return false
+    return {}
   end
-  local result = handle:read('*a'):gsub('%s+', '')
+  local existing = {}
+  for line in handle:lines() do
+    existing[line] = true
+  end
   handle:close()
-  return result == 'yes'
+  return existing
 end
 
----Check if a group exists on Windows
----@param group string
----@return boolean
-local function windows_group_exists(group)
-  local handle = io.popen(
-    interpolate(
-      'powershell -NoProfile -Command "if (Get-LocalGroup -Name \'{{group}}\' -ErrorAction SilentlyContinue) { echo yes } else { echo no }"',
-      { group = group }
-    )
-  )
+---Get all existing groups on Windows (batch operation)
+---@return table<string, boolean>
+local function windows_get_all_groups()
+  local handle = io.popen('powershell -NoProfile -Command "Get-LocalGroup | ForEach-Object { $_.Name }"')
   if not handle then
-    return false
+    return {}
   end
-  local result = handle:read('*a'):gsub('%s+', '')
+  local existing = {}
+  for line in handle:lines() do
+    local group = line:gsub('%s+$', '')
+    if group ~= '' then
+      existing[group] = true
+    end
+  end
   handle:close()
-  return result == 'yes'
+  return existing
 end
 
----Check if a group exists (cross-platform)
----@param group string
----@return boolean
-local function group_exists(group)
+---Get all existing groups (cross-platform, single shell spawn)
+---@return table<string, boolean>
+local function get_all_groups()
   if sys.os == 'linux' then
-    return linux_group_exists(group)
+    return linux_get_all_groups()
   elseif sys.os == 'darwin' then
-    return darwin_group_exists(group)
+    return darwin_get_all_groups()
   elseif sys.os == 'windows' then
-    return windows_group_exists(group)
+    return windows_get_all_groups()
   end
-  return false
+  return {}
+end
+
+---Validate that all groups exist (batch operation)
+---@param groups string[] List of groups to check
+---@return string[] List of missing groups
+local function validate_groups_exist(groups)
+  if #groups == 0 then
+    return {}
+  end
+
+  local existing = get_all_groups()
+  local missing = {}
+  for _, group in ipairs(groups) do
+    if not existing[group] then
+      table.insert(missing, group)
+    end
+  end
+  return missing
 end
 
 ---Check if a config path exists (file or directory with init.lua)
@@ -569,7 +588,8 @@ end
 ---@param name string
 ---@param opts syslua.user.Options
 ---@param groups string[]
-local function validate_user_options(name, opts, groups)
+---@param missing_groups_set table<string, boolean> Pre-computed set of missing groups
+local function validate_user_options(name, opts, groups, missing_groups_set)
   local home_dir = prio.unwrap(opts.homeDir)
   local config = prio.unwrap(opts.config)
 
@@ -589,18 +609,18 @@ local function validate_user_options(name, opts, groups)
     error(interpolate("user '{{name}}': config path does not exist: {{config}}", { name = name, config = config }), 0)
   end
 
-  -- Validate all groups exist
-  local missing_groups = {}
+  -- Check user's groups against pre-validated set
+  local user_missing = {}
   for _, group in ipairs(groups) do
-    if not group_exists(group) then
-      table.insert(missing_groups, group)
+    if missing_groups_set[group] then
+      table.insert(user_missing, group)
     end
   end
-  if #missing_groups > 0 then
+  if #user_missing > 0 then
     error(
       interpolate(
         "user '{{name}}': groups do not exist: {{groups}}",
-        { name = name, groups = table.concat(missing_groups, ', ') }
+        { name = name, groups = table.concat(user_missing, ', ') }
       ),
       0
     )
@@ -918,18 +938,40 @@ function M.setup(users)
     error('syslua.user.setup: at least one user definition is required', 2)
   end
 
+  -- Phase 1: Collect all data and unique groups from all users
+  local user_data = {} -- name -> { merged, groups }
+  local all_groups = {} -- unique groups across all users
+
   for name, opts in pairs(users) do
-    -- Merge user options with defaults
     local merged = prio.merge(M.defaults, opts)
     if not merged then
       error(interpolate("user '{{name}}': failed to merge options", { name = name }), 2)
     end
 
-    -- Resolve groups early for validation and bind creation
     local groups = resolve_groups(merged.groups)
+    user_data[name] = { merged = merged, groups = groups }
 
-    validate_user_options(name, merged, groups)
-    create_user_bind(name, merged, groups)
+    -- Collect unique groups
+    for _, group in ipairs(groups) do
+      all_groups[group] = true
+    end
+  end
+
+  -- Phase 2: Batch validate all groups with single shell spawn
+  local unique_groups = {}
+  for group in pairs(all_groups) do
+    table.insert(unique_groups, group)
+  end
+  local missing_groups = validate_groups_exist(unique_groups)
+  local missing_set = {}
+  for _, group in ipairs(missing_groups) do
+    missing_set[group] = true
+  end
+
+  -- Phase 3: Validate each user and create binds
+  for name, data in pairs(user_data) do
+    validate_user_options(name, data.merged, data.groups, missing_set)
+    create_user_bind(name, data.merged, data.groups)
   end
 end
 
