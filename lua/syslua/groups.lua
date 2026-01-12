@@ -15,11 +15,6 @@ local M = {}
 
 ---@alias syslua.groups.GroupMap table<string, syslua.groups.Options>
 
----@class syslua.groups.Defaults
----@field description string
----@field gid nil
----@field system boolean
-
 -- ============================================================================
 -- Constants
 -- ============================================================================
@@ -30,11 +25,9 @@ local BIND_ID_PREFIX = '__syslua_group_'
 -- Default Options
 -- ============================================================================
 
----@type syslua.groups.Defaults
 M.defaults = {
-  description = '',
-  gid = nil,
-  system = false,
+  description = prio.default(''),
+  system = prio.default(false),
 }
 
 -- ============================================================================
@@ -185,89 +178,6 @@ end
 -- ============================================================================
 -- Validation Helpers
 -- ============================================================================
-
----Get group members on Linux
----@param name string
----@return string[]
-local function linux_get_group_members(name)
-  local handle = io.popen(interpolate('getent group "{{name}}" 2>/dev/null | cut -d: -f4', { name = name }))
-  if not handle then
-    return {}
-  end
-  local members_str = handle:read('*a'):gsub('%s+$', '')
-  handle:close()
-  if members_str == '' then
-    return {}
-  end
-  local members = {}
-  for member in members_str:gmatch('[^,]+') do
-    table.insert(members, member)
-  end
-  return members
-end
-
----Get group members on macOS
----@param name string
----@return string[]
-local function darwin_get_group_members(name)
-  local handle = io.popen(
-    interpolate(
-      'dscl . -read /Groups/{{name}} GroupMembership 2>/dev/null | sed "s/GroupMembership://" | tr " " "\\n" | grep -v "^$"',
-      { name = name }
-    )
-  )
-  if not handle then
-    return {}
-  end
-  local members = {}
-  for line in handle:lines() do
-    local member = line:gsub('%s+', '')
-    if member ~= '' then
-      table.insert(members, member)
-    end
-  end
-  handle:close()
-  return members
-end
-
----Get group members on Windows
----@param name string
----@return string[]
-local function windows_get_group_members(name)
-  local handle = io.popen(
-    interpolate(
-      'powershell -NoProfile -Command "Get-LocalGroupMember -Group \\"{{name}}\\" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }"',
-      { name = name }
-    )
-  )
-  if not handle then
-    return {}
-  end
-  local members = {}
-  for line in handle:lines() do
-    local member = line:gsub('%s+$', '')
-    if member ~= '' then
-      table.insert(members, member)
-    end
-  end
-  handle:close()
-  return members
-end
-
----Get group members (cross-platform)
----@param name string
----@param os string
----@return string[]
-local function get_group_members(name, os)
-  if os == 'linux' then
-    return linux_get_group_members(name)
-  elseif os == 'darwin' then
-    return darwin_get_group_members(name)
-  elseif os == 'windows' then
-    return windows_get_group_members(name)
-  end
-  return {}
-end
 
 ---Validate GID range and warn if in system range
 ---@param name string
@@ -422,18 +332,6 @@ local function create_group_bind(name, opts)
     end,
 
     destroy = function(outputs, ctx)
-      local members = get_group_members(outputs.groupname, outputs.os)
-      if #members > 0 then
-        print(
-          string.format(
-            "Warning: deleting group '%s' which has %d member(s): %s\n",
-            outputs.groupname,
-            #members,
-            table.concat(members, ', ')
-          )
-        )
-      end
-
       if outputs.os == 'linux' then
         local exists_check = linux_group_exists_check(outputs.groupname)
         local bin, args = linux_delete_group_cmd(outputs.groupname)

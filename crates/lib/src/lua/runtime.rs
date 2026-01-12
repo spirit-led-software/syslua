@@ -2,16 +2,23 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
+use mlua::StdLib;
 use mlua::prelude::*;
 
 use crate::lua::globals;
 use crate::manifest::Manifest;
 
-/// Create a new Lua runtime environment with standard settings.
-/// Registers global tables and functions as needed.
-/// Returns the initialized Lua instance.
-pub fn create_runtime(manifest: Rc<RefCell<Manifest>>) -> LuaResult<Lua> {
-  let lua = Lua::new();
+fn stdlib_for_mode(impure: bool) -> StdLib {
+  let base = StdLib::COROUTINE | StdLib::TABLE | StdLib::STRING | StdLib::UTF8 | StdLib::MATH | StdLib::PACKAGE;
+  if impure { base | StdLib::IO | StdLib::OS } else { base }
+}
+
+pub fn create_lua(impure: bool) -> LuaResult<Lua> {
+  Lua::new_with(stdlib_for_mode(impure), LuaOptions::default())
+}
+
+pub fn create_runtime(manifest: Rc<RefCell<Manifest>>, impure: bool) -> LuaResult<Lua> {
+  let lua = create_lua(impure)?;
   let package_path = lua.globals().get::<LuaTable>("package")?.get::<String>("path")?;
   let new_package_path = format!("./lua/?.lua;./lua/?/init.lua;{}", package_path);
   lua

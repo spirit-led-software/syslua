@@ -1,29 +1,14 @@
 --- Basic bind create/destroy lifecycle.
 --- Tests that binds can be created and destroyed.
 
-local TEST_DIR = os.getenv('TEST_OUTPUT_DIR')
-if TEST_DIR then
-  TEST_DIR = sys.path.canonicalize(TEST_DIR)
-else
-  TEST_DIR = '/tmp/syslua-test'
-end
+local TEST_DIR = sys.getenv('TEST_OUTPUT_DIR')
 
---- Cross-platform shell execution with PATH injection for sandbox.
---- @param ctx BuildCtx | BindCtx
---- @param script string
---- @return string
 local function sh(ctx, script)
   if sys.os == 'windows' then
-    local system_drive = os.getenv('SystemDrive') or 'C:'
     return ctx:exec({
       bin = 'powershell.exe',
-      args = {
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        script,
-      },
-      env = { PATH = system_drive .. '\\Windows\\System32;' .. system_drive .. '\\Windows' },
+      args = { '-NoProfile', '-NonInteractive', '-Command', script },
+      env = { PATH = sys.getenv('SystemDrive') .. '\\Windows\\System32;' .. sys.getenv('SystemDrive') .. '\\Windows' },
     })
   else
     return ctx:exec({

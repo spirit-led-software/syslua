@@ -7,10 +7,10 @@ fn rollback_restores_destroyed_binds_on_failure() {
   let env = TestEnv::from_fixture("rollback_bind_failure.lua");
   let marker_file = env.output_path().join("original.txt");
 
-  // Phase 1: Create the original bind
   env
     .sys_cmd()
     .arg("apply")
+    .arg("--impure")
     .arg(&env.config_path)
     .env("TEST_PHASE", "initial")
     .assert()
@@ -18,10 +18,10 @@ fn rollback_restores_destroyed_binds_on_failure() {
 
   assert!(marker_file.exists(), "original.txt should exist after initial apply");
 
-  // Phase 2: Apply with failing bind (should trigger rollback)
   env
     .sys_cmd()
     .arg("apply")
+    .arg("--impure")
     .arg(&env.config_path)
     .env("TEST_PHASE", "failure")
     .assert()

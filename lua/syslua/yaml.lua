@@ -619,15 +619,14 @@ end
 function Parser:parseTimestamp()
   local cap = self:advance().captures
 
-  return os.time({
-    year = cap[1],
-    month = cap[2],
-    day = cap[3],
-    hour = cap[4] or 0,
-    min = cap[5] or 0,
-    sec = cap[6] or 0,
-    isdst = false,
-  }) - os.time({ year = 1970, month = 1, day = 1, hour = 8 })
+  return sys.mktime({
+    year = tonumber(cap[1]),
+    month = tonumber(cap[2]),
+    day = tonumber(cap[3]),
+    hour = tonumber(cap[4]) or 0,
+    min = tonumber(cap[5]) or 0,
+    sec = tonumber(cap[6]) or 0,
+  })
 end
 
 -------------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 pub mod common;
+pub mod groups_tests;
 pub mod lib_tests;
 pub mod modules_tests;
 pub mod pkgs_tests;

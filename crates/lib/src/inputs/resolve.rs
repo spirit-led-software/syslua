@@ -604,7 +604,7 @@ fn resolve_single_input(
 /// Extract input declarations from an input's init.lua file.
 fn extract_input_decls_from_file(init_path: &Path) -> Result<InputDecls, ResolveError> {
   let manifest = Rc::new(RefCell::new(Manifest::default()));
-  let lua = runtime::create_runtime(manifest).map_err(|e| ResolveError::ExtractInputs {
+  let lua = runtime::create_runtime(manifest, false).map_err(|e| ResolveError::ExtractInputs {
     name: init_path.display().to_string(),
     message: e.to_string(),
   })?;

@@ -321,7 +321,7 @@ local function parse_object(str, i)
       decode_error(str, i, 'expected string for key')
     end
     key, i = parse(str, i)
-    if not type(key) == 'string' then
+    if type(key) ~= 'string' then
       decode_error(str, i, 'expected string for key')
     end
     i = next_char(str, i, space_chars, true)

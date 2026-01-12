@@ -10,7 +10,7 @@ use std::time::Instant;
 use anyhow::{Context, Result};
 use owo_colors::OwoColorize;
 
-use syslua_lib::eval::evaluate_config;
+use syslua_lib::eval::{EvalOptions, evaluate_config};
 
 use crate::output::{OutputFormat, format_duration, print_json, print_stat, symbols, truncate_hash};
 use syslua_lib::execute::{ExecuteConfig, check_unchanged_binds};
@@ -18,11 +18,13 @@ use syslua_lib::platform::paths::{plans_dir, store_dir};
 use syslua_lib::snapshot::{SnapshotStore, compute_diff};
 use syslua_lib::util::hash::Hashable;
 
-pub fn cmd_plan(file: &str, output: OutputFormat) -> Result<()> {
+pub fn cmd_plan(file: &str, impure: bool, output: OutputFormat) -> Result<()> {
   let start = Instant::now();
   let path = Path::new(file);
 
-  let manifest = evaluate_config(path).with_context(|| format!("Failed to evaluate config: {}", file))?;
+  let eval_options = EvalOptions { impure };
+  let manifest =
+    evaluate_config(path, &eval_options).with_context(|| format!("Failed to evaluate config: {}", file))?;
 
   let hash = manifest.compute_hash().context("Failed to compute manifest hash")?;
 

@@ -28,7 +28,7 @@ use crate::bind::execute::{apply_bind, check_bind, destroy_bind, update_bind};
 use crate::bind::state::{BindState, BindStateError, load_bind_state, remove_bind_state, save_bind_state};
 use crate::bind::store::bind_dir_path;
 use crate::build::store::build_dir_path;
-use crate::eval::{EvalError, evaluate_config};
+use crate::eval::{EvalError, EvalOptions, evaluate_config};
 use crate::execute::execute_manifest;
 use crate::manifest::Manifest;
 use crate::platform::paths::store_dir;
@@ -143,6 +143,9 @@ pub struct ApplyOptions {
 
   /// Check unchanged binds for drift and repair if drifted.
   pub repair: bool,
+
+  /// Allow impure Lua libs (io, os). Breaks determinism.
+  pub impure: bool,
 }
 
 /// Options for the destroy operation.
@@ -207,9 +210,9 @@ pub async fn apply(config_path: &Path, options: &ApplyOptions) -> Result<ApplyRe
 
   debug!(has_current = current_snapshot.is_some(), "loaded current state");
 
-  // 2. Evaluate config to produce desired manifest
   debug!("evaluating config");
-  let desired_manifest = evaluate_config(config_path)?;
+  let eval_options = EvalOptions { impure: options.impure };
+  let desired_manifest = evaluate_config(config_path, &eval_options)?;
 
   debug!(
     builds = desired_manifest.builds.len(),
@@ -1119,6 +1122,7 @@ mod tests {
       execute: ExecuteConfig { parallelism: 1 },
       dry_run: false,
       repair: false,
+      impure: false,
     }
   }
 

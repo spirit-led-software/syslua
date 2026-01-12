@@ -32,7 +32,7 @@ use crate::manifest::Manifest;
 /// ```
 pub fn extract_input_decls(entrypoint_path: &str) -> LuaResult<InputDecls> {
   let manifest = Rc::new(RefCell::new(Manifest::default()));
-  let lua = runtime::create_runtime(manifest)?;
+  let lua = runtime::create_runtime(manifest, false)?;
 
   let path = Path::new(entrypoint_path);
   let result = runtime::load_file(&lua, path)?;

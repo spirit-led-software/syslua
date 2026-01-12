@@ -29,7 +29,7 @@ use syslua_lib::platform::paths;
 /// - Saves new snapshot
 ///
 /// Prints a summary including counts of builds realized, binds applied/destroyed, and the snapshot ID.
-pub fn cmd_apply(file: &str, repair: bool, output: OutputFormat) -> Result<()> {
+pub fn cmd_apply(file: &str, repair: bool, impure: bool, output: OutputFormat) -> Result<()> {
   let start = Instant::now();
   let path = Path::new(file);
 
@@ -37,6 +37,7 @@ pub fn cmd_apply(file: &str, repair: bool, output: OutputFormat) -> Result<()> {
     execute: ExecuteConfig::default(),
     dry_run: false,
     repair,
+    impure,
   };
 
   // Run async apply

@@ -7,16 +7,10 @@
 --- @return string
 local function sh(ctx, script)
   if sys.os == 'windows' then
-    local system_drive = os.getenv('SystemDrive') or 'C:'
     return ctx:exec({
       bin = 'powershell.exe',
-      args = {
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        script,
-      },
-      env = { PATH = system_drive .. '\\Windows\\System32;' .. system_drive .. '\\Windows' },
+      args = { '-NoProfile', '-NonInteractive', '-Command', script },
+      env = { PATH = sys.getenv('SystemDrive') .. '\\Windows\\System32;' .. sys.getenv('SystemDrive') .. '\\Windows' },
     })
   else
     return ctx:exec({

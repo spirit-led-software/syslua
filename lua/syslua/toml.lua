@@ -183,7 +183,7 @@ local function parse(toml_string, options)
           local uni = char(1) .. char(2) .. char(3) .. char(4)
           step(5)
           local uni_num = tonumber(uni, 16)
-          if (uni_num >= 0 and uni_num <= 0xd7ff) and not (uni_num >= 0xe000 and uni_num <= 0x10ffff) then
+          if (uni_num >= 0 and uni_num <= 0xd7ff) or (uni_num >= 0xe000 and uni_num <= 0x10ffff) then
             n = n + 1
             parts[n] = codepoint_to_utf8(uni_num)
             is_empty = false
@@ -195,7 +195,7 @@ local function parse(toml_string, options)
           local uni = char(1) .. char(2) .. char(3) .. char(4) .. char(5) .. char(6) .. char(7) .. char(8)
           step(9)
           local uni_num = tonumber(uni, 16)
-          if (uni_num >= 0 and uni_num <= 0xd7ff) and not (uni_num >= 0xe000 and uni_num <= 0x10ffff) then
+          if (uni_num >= 0 and uni_num <= 0xd7ff) or (uni_num >= 0xe000 and uni_num <= 0x10ffff) then
             n = n + 1
             parts[n] = codepoint_to_utf8(uni_num)
             is_empty = false

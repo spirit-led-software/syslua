@@ -5,7 +5,7 @@ return {
   setup = function()
     require('syslua').setup()
 
-    local marker_path = os.getenv('TEST_OUTPUT_DIR') .. '/bind-script-marker.txt'
+    local marker_path = sys.getenv('TEST_OUTPUT_DIR') .. '/bind-script-marker.txt'
 
     sys.bind({
       id = 'test-bind-script',
