@@ -702,14 +702,20 @@ end
 -- Public API
 -------------------------------------------------------------------------------
 
-function toml.parse(toml_string, options)
-  return parse(toml_string, options)
+---@class TomlOptions
+---@field strict? boolean
+
+---@param val string
+---@param options? TomlOptions
+---@return table
+function toml.decode(val, options)
+  return parse(val, options)
 end
 
+---@param tbl table
+---@return string
 function toml.encode(tbl)
   return encode(tbl)
 end
-
-toml.decode = toml.parse
 
 return toml

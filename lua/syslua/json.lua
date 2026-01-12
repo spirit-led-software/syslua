@@ -1,8 +1,6 @@
 --
 -- json.lua
 --
--- Copyright (c) 2020 rxi
---
 -- Permission is hereby granted, free of charge, to any person obtaining a copy of
 -- this software and associated documentation files (the "Software"), to deal in
 -- the Software without restriction, including without limitation the rights to
@@ -22,7 +20,7 @@
 -- SOFTWARE.
 --
 
-local json = { _version = '0.1.2' }
+local json = { version = '0.1.2' }
 
 -------------------------------------------------------------------------------
 -- Cached globals
@@ -323,6 +321,9 @@ local function parse_object(str, i)
       decode_error(str, i, 'expected string for key')
     end
     key, i = parse(str, i)
+    if not type(key) == 'string' then
+      decode_error(str, i, 'expected string for key')
+    end
     i = next_char(str, i, space_chars, true)
     if string_sub(str, i, i) ~= ':' then
       decode_error(str, i, "expected ':' after key")
@@ -376,10 +377,14 @@ end
 --- Public API
 -------------------------------------------------------------------------------
 
+---@param val any
+---@return string
 function json.encode(val)
   return (encode(val))
 end
 
+---@param str string
+---@return any
 function json.decode(str)
   if type(str) ~= 'string' then
     error('expected argument of type string, got ' .. type(str))
