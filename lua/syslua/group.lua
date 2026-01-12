@@ -188,4 +188,113 @@ local function windows_update_group_script(name, opts)
   )
 end
 
+-- ============================================================================
+-- Validation Helpers
+-- ============================================================================
+
+---Get group members on Linux
+---@param name string
+---@return string[]
+local function linux_get_group_members(name)
+  local handle = io.popen(interpolate(
+    'getent group "{{name}}" 2>/dev/null | cut -d: -f4',
+    { name = name }
+  ))
+  if not handle then return {} end
+  local members_str = handle:read('*a'):gsub('%s+$', '')
+  handle:close()
+  if members_str == '' then return {} end
+  local members = {}
+  for member in members_str:gmatch('[^,]+') do
+    table.insert(members, member)
+  end
+  return members
+end
+
+---Get group members on macOS
+---@param name string
+---@return string[]
+local function darwin_get_group_members(name)
+  local handle = io.popen(interpolate(
+    'dscl . -read /Groups/{{name}} GroupMembership 2>/dev/null | sed "s/GroupMembership://" | tr " " "\\n" | grep -v "^$"',
+    { name = name }
+  ))
+  if not handle then return {} end
+  local members = {}
+  for line in handle:lines() do
+    local member = line:gsub('%s+', '')
+    if member ~= '' then
+      table.insert(members, member)
+    end
+  end
+  handle:close()
+  return members
+end
+
+---Get group members on Windows
+---@param name string
+---@return string[]
+local function windows_get_group_members(name)
+  local handle = io.popen(interpolate(
+    'powershell -NoProfile -Command "Get-LocalGroupMember -Group \\"{{name}}\\" -ErrorAction SilentlyContinue | ForEach-Object { $_.Name }"',
+    { name = name }
+  ))
+  if not handle then return {} end
+  local members = {}
+  for line in handle:lines() do
+    local member = line:gsub('%s+$', '')
+    if member ~= '' then
+      table.insert(members, member)
+    end
+  end
+  handle:close()
+  return members
+end
+
+---Get group members (cross-platform)
+---@param name string
+---@return string[]
+local function get_group_members(name)
+  if sys.os == 'linux' then
+    return linux_get_group_members(name)
+  elseif sys.os == 'darwin' then
+    return darwin_get_group_members(name)
+  elseif sys.os == 'windows' then
+    return windows_get_group_members(name)
+  end
+  return {}
+end
+
+---Validate GID range and warn if in system range
+---@param name string
+---@param gid number?
+---@param is_system boolean
+local function validate_gid(name, gid, is_system)
+  if not gid then return end
+
+  local system_max = 999
+  if gid <= system_max and not is_system then
+    io.stderr:write(string.format(
+      "Warning: group '%s' has GID %d which is in system range (<%d). Consider using system=true or a higher GID.\n",
+      name, gid, system_max + 1
+    ))
+  end
+end
+
+---Validate group options
+---@param name string
+---@param opts syslua.group.Options
+local function validate_group_options(name, opts)
+  if not sys.is_elevated then
+    error('syslua.group requires elevated privileges (root/Administrator)', 0)
+  end
+
+  local gid = prio.unwrap(opts.gid)
+  local is_system = prio.unwrap(opts.system) or false
+
+  if gid then
+    validate_gid(name, gid, is_system)
+  end
+end
+
 return M
