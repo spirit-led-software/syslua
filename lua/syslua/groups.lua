@@ -166,10 +166,7 @@ end
 ---@return string
 local function darwin_update_group_script(name, opts)
   if opts.description ~= nil then
-    return interpolate(
-      'dscl . -create /Groups/{{name}} RealName "{{desc}}"',
-      { name = name, desc = opts.description }
-    )
+    return interpolate('dscl . -create /Groups/{{name}} RealName "{{desc}}"', { name = name, desc = opts.description })
   end
   return 'true'
 end
