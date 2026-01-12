@@ -145,10 +145,6 @@ encode = function(val, stack)
   error("unexpected type '" .. t .. "'")
 end
 
-function json.encode(val)
-  return (encode(val))
-end
-
 -------------------------------------------------------------------------------
 -- Decode
 -------------------------------------------------------------------------------
@@ -204,7 +200,12 @@ local function codepoint_to_utf8(n)
   elseif n <= 0xffff then
     return string_char(math_floor(n / 4096) + 224, math_floor(n % 4096 / 64) + 128, n % 64 + 128)
   elseif n <= 0x10ffff then
-    return string_char(math_floor(n / 262144) + 240, math_floor(n % 262144 / 4096) + 128, math_floor(n % 4096 / 64) + 128, n % 64 + 128)
+    return string_char(
+      math_floor(n / 262144) + 240,
+      math_floor(n % 262144 / 4096) + 128,
+      math_floor(n % 4096 / 64) + 128,
+      n % 64 + 128
+    )
   end
   error(string_format("invalid unicode codepoint '%x'", n))
 end
@@ -369,6 +370,14 @@ parse = function(str, idx)
     return f(str, idx)
   end
   decode_error(str, idx, "unexpected character '" .. chr .. "'")
+end
+
+-------------------------------------------------------------------------------
+--- Public API
+-------------------------------------------------------------------------------
+
+function json.encode(val)
+  return (encode(val))
 end
 
 function json.decode(str)

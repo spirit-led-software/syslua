@@ -1,11 +1,34 @@
--- Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 --
--- The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+-- toml.lua
 --
--- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-- Permission is hereby granted, free of charge, to any person obtaining a copy
+-- of this software and associated documentation files (the "Software"), to deal
+-- in the Software without restriction, including without limitation the rights
+-- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+-- copies of the Software, and to permit persons to whom the Software is
+-- furnished to do so, subject to the following conditions:
+--
+-- The above copyright notice and this permission notice shall be included in
+-- all copies or substantial portions of the Software.
+--
+-- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+-- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+-- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+-- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+-- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+-- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+-- SOFTWARE.
+--
+
+local toml = { version = '0.4.0', strict = true }
+
+-------------------------------------------------------------------------------
+-- Cached globals
+-------------------------------------------------------------------------------
 
 local type = type
 local pairs = pairs
+local ipairs = ipairs
 local tostring = tostring
 local tonumber = tonumber
 local error = error
@@ -21,13 +44,11 @@ local table_concat = table.concat
 local table_insert = table.insert
 local math_floor = math.floor
 
-local toml = {
-  version = 0.40,
-  strict = true,
-}
+-------------------------------------------------------------------------------
+-- Decode
+-------------------------------------------------------------------------------
 
--- converts TOML data into a lua table
-toml.parse = function(toml_string, options)
+local function parse(toml_string, options)
   options = options or {}
   local strict = (options.strict ~= nil and options.strict or toml.strict)
 
@@ -423,12 +444,11 @@ toml.parse = function(toml_string, options)
       step()
       skipWhitespace()
 
-      local key_str = trim(get_buffer())
       ---@type string|number
-      local key = key_str
+      local key = trim(get_buffer())
 
-      if string_match(key_str, '^[0-9]*$') and not quotedKey then
-        key = tonumber(key_str) or key_str
+      if string_match(key, '^[0-9]*$') and not quotedKey then
+        key = tonumber(key) or key
       end
 
       if (not key or key == '') and not quotedKey then
@@ -546,7 +566,56 @@ toml.parse = function(toml_string, options)
   return out
 end
 
-toml.encode = function(tbl)
+-------------------------------------------------------------------------------
+-- Encode
+-------------------------------------------------------------------------------
+
+local function encode_string(s)
+  local quote = '"'
+  s = string_gsub(s, '\\', '\\\\')
+
+  if string_match(s, '^\n(.*)$') then
+    quote = string_rep(quote, 3)
+    s = '\\n' .. s
+  elseif string_match(s, '\n') then
+    quote = string_rep(quote, 3)
+  end
+
+  s = string_gsub(s, '\b', '\\b')
+  s = string_gsub(s, '\t', '\\t')
+  s = string_gsub(s, '\f', '\\f')
+  s = string_gsub(s, '\r', '\\r')
+  s = string_gsub(s, '"', '\\"')
+  s = string_gsub(s, '/', '\\/')
+  return quote .. s .. quote
+end
+
+local function encode_value(val)
+  local vtype = type(val)
+  if vtype == 'boolean' or vtype == 'number' then
+    return tostring(val)
+  elseif vtype == 'string' then
+    return encode_string(val)
+  else
+    error('toml.encode: cannot encode ' .. vtype .. ' as value')
+  end
+end
+
+local function is_simple_array(val)
+  local count = 0
+  for k, v in pairs(val) do
+    if type(k) ~= 'number' then
+      return false
+    end
+    if type(v) == 'table' then
+      return false
+    end
+    count = count + 1
+  end
+  return count == #val
+end
+
+local function encode(tbl)
   local output = {}
   local out_n = 0
 
@@ -559,75 +628,66 @@ toml.encode = function(tbl)
   end
 
   local function encode_table(t)
+    local tables = {}
+    local tables_n = 0
+
     for k, v in pairs(t) do
       local vtype = type(v)
       if vtype == 'boolean' or vtype == 'number' then
         emit(k .. ' = ' .. tostring(v) .. '\n')
       elseif vtype == 'string' then
-        local quote = '"'
-        v = string_gsub(v, '\\', '\\\\')
-
-        if string_match(v, '^\n(.*)$') then
-          quote = string_rep(quote, 3)
-          v = '\\n' .. v
-        elseif string_match(v, '\n') then
-          quote = string_rep(quote, 3)
-        end
-
-        v = string_gsub(v, '\b', '\\b')
-        v = string_gsub(v, '\t', '\\t')
-        v = string_gsub(v, '\f', '\\f')
-        v = string_gsub(v, '\r', '\\r')
-        v = string_gsub(v, '"', '\\"')
-        v = string_gsub(v, '/', '\\/')
-        emit(k .. ' = ' .. quote .. v .. quote .. '\n')
+        emit(k .. ' = ' .. encode_string(v) .. '\n')
       elseif vtype == 'table' then
-        local array, arrayTable = true, true
-        local first = {}
-        for kk, vv in pairs(v) do
-          if type(kk) ~= 'number' then
-            array = false
-          end
-          if type(vv) ~= 'table' then
-            v[kk] = nil
-            first[kk] = vv
-            arrayTable = false
-          end
-        end
-
-        if array then
-          if arrayTable then
-            cache_n = cache_n + 1
-            cache[cache_n] = k
-            for _, vv in pairs(v) do
-              emit('[[' .. table_concat(cache, '.') .. ']]\n')
-              for k3, v3 in pairs(vv) do
-                if type(v3) ~= 'table' then
-                  vv[k3] = nil
-                  first[k3] = v3
-                end
-              end
-              encode_table(first)
-              encode_table(vv)
+        if is_simple_array(v) then
+          emit(k .. ' = [')
+          for i, vv in ipairs(v) do
+            if i > 1 then
+              emit(', ')
             end
-            cache[cache_n] = nil
-            cache_n = cache_n - 1
-          else
-            emit(k .. ' = [\n')
-            for _, vv in pairs(first) do
-              emit(tostring(vv) .. ',\n')
-            end
-            emit(']\n')
+            emit(encode_value(vv))
           end
+          emit(']\n')
         else
-          cache_n = cache_n + 1
-          cache[cache_n] = k
-          emit('[' .. table_concat(cache, '.') .. ']\n')
-          encode_table(first)
-          encode_table(v)
-          cache[cache_n] = nil
-          cache_n = cache_n - 1
+          tables_n = tables_n + 1
+          tables[tables_n] = { key = k, val = v }
         end
+      end
+    end
+
+    for i = 1, tables_n do
+      local item = tables[i]
+      local k, v = item.key, item.val
+      local is_array_of_tables = true
+      local count = 0
+      for kk, vv in pairs(v) do
+        if type(kk) ~= 'number' then
+          is_array_of_tables = false
+          break
+        end
+        if type(vv) ~= 'table' then
+          is_array_of_tables = false
+          break
+        end
+        count = count + 1
+      end
+      is_array_of_tables = is_array_of_tables and count == #v
+
+      if is_array_of_tables then
+        cache_n = cache_n + 1
+        cache[cache_n] = k
+        for _, vv in ipairs(v) do
+          emit('[[' .. table_concat(cache, '.') .. ']]\n')
+          encode_table(vv)
+        end
+        cache[cache_n] = nil
+        cache_n = cache_n - 1
+      else
+        cache_n = cache_n + 1
+        cache[cache_n] = k
+        emit('[' .. table_concat(cache, '.') .. ']\n')
+        encode_table(v)
+        cache[cache_n] = nil
+        cache_n = cache_n - 1
       end
     end
   end
@@ -637,5 +697,19 @@ toml.encode = function(tbl)
   local result = table_concat(output)
   return string_sub(result, 1, -2)
 end
+
+-------------------------------------------------------------------------------
+-- Public API
+-------------------------------------------------------------------------------
+
+function toml.parse(toml_string, options)
+  return parse(toml_string, options)
+end
+
+function toml.encode(tbl)
+  return encode(tbl)
+end
+
+toml.decode = toml.parse
 
 return toml

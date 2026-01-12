@@ -13,13 +13,17 @@ local yaml = { version = '1.3' }
 local type = type
 local pairs = pairs
 local ipairs = ipairs
+local next = next
 local tostring = tostring
 local tonumber = tonumber
 local error = error
+local math_floor = math.floor
+local math_huge = math.huge
 local string_sub = string.sub
 local string_rep = string.rep
 local string_format = string.format
 local string_match = string.match
+local string_gmatch = string.gmatch
 local string_gsub = string.gsub
 local table_concat = table.concat
 local table_sort = table.sort
@@ -611,15 +615,196 @@ function Parser:parseTimestamp()
 end
 
 -------------------------------------------------------------------------------
+-- Encode
+-------------------------------------------------------------------------------
+
+local encode_value
+
+local function is_array(t)
+  if type(t) ~= 'table' then
+    return false
+  end
+  local count = 0
+  for k in pairs(t) do
+    if type(k) ~= 'number' then
+      return false
+    end
+    count = count + 1
+  end
+  return count == #t
+end
+
+local function needs_quoting(s)
+  if s == '' then
+    return true
+  end
+  if string_match(s, '^[%s]') or string_match(s, '[%s]$') then
+    return true
+  end
+  if string_match(s, '^[%-%?%:%,#&%*!|>\'"%%@`{}%[%]]') then
+    return true
+  end
+  if string_match(s, '[\n\r]') then
+    return true
+  end
+  if string_match(s, ': ') or string_match(s, ' #') then
+    return true
+  end
+  local lower = s:lower()
+  if lower == 'true' or lower == 'false' or lower == 'null' or lower == 'yes' or lower == 'no' then
+    return true
+  end
+  if tonumber(s) then
+    return true
+  end
+  return false
+end
+
+local function encode_string(s)
+  if string_match(s, '\n') then
+    local lines = {}
+    local n = 0
+    for line in string_gmatch(s .. '\n', '([^\n]*)\n') do
+      n = n + 1
+      lines[n] = line
+    end
+    while n > 0 and lines[n] == '' do
+      lines[n] = nil
+      n = n - 1
+    end
+    return '|\n  ' .. table_concat(lines, '\n  ')
+  elseif needs_quoting(s) then
+    local escaped = string_gsub(s, '\\', '\\\\')
+    escaped = string_gsub(escaped, '"', '\\"')
+    escaped = string_gsub(escaped, '\t', '\\t')
+    escaped = string_gsub(escaped, '\r', '\\r')
+    return '"' .. escaped .. '"'
+  else
+    return s
+  end
+end
+
+local function encode_array(arr, indent)
+  if #arr == 0 then
+    return '[]'
+  end
+
+  local parts = {}
+  local pn = 0
+  local prefix = string_rep('  ', indent)
+
+  for i = 1, #arr do
+    local v = arr[i]
+    local encoded = encode_value(v, indent + 1)
+
+    if type(v) == 'table' then
+      if is_array(v) then
+        pn = pn + 1
+        parts[pn] = prefix .. '-\n' .. encoded
+      else
+        local first_line, rest = string_match(encoded, '^([^\n]*)\n?(.*)')
+        pn = pn + 1
+        if rest and rest ~= '' then
+          parts[pn] = prefix .. '- ' .. first_line .. '\n' .. rest
+        else
+          parts[pn] = prefix .. '- ' .. first_line
+        end
+      end
+    else
+      pn = pn + 1
+      parts[pn] = prefix .. '- ' .. encoded
+    end
+  end
+
+  return table_concat(parts, '\n')
+end
+
+local function encode_table(tbl, indent)
+  local keys = {}
+  local n = 0
+  for k in pairs(tbl) do
+    n = n + 1
+    keys[n] = k
+  end
+
+  if n == 0 then
+    return '{}'
+  end
+
+  table_sort(keys, function(a, b)
+    return tostring(a) < tostring(b)
+  end)
+
+  local parts = {}
+  local pn = 0
+  local prefix = string_rep('  ', indent)
+
+  for i = 1, n do
+    local k = keys[i]
+    local v = tbl[k]
+    local key_str = tostring(k)
+
+    if needs_quoting(key_str) then
+      key_str = '"' .. string_gsub(key_str, '"', '\\"') .. '"'
+    end
+
+    local encoded = encode_value(v, indent + 1)
+
+    if type(v) == 'table' and next(v) ~= nil then
+      pn = pn + 1
+      parts[pn] = prefix .. key_str .. ':\n' .. encoded
+    else
+      pn = pn + 1
+      parts[pn] = prefix .. key_str .. ': ' .. encoded
+    end
+  end
+
+  return table_concat(parts, '\n')
+end
+
+encode_value = function(val, indent)
+  indent = indent or 0
+  local t = type(val)
+
+  if val == nil then
+    return 'null'
+  elseif t == 'boolean' then
+    return val and 'true' or 'false'
+  elseif t == 'number' then
+    if val ~= val then
+      return '.nan'
+    elseif val == math_huge then
+      return '.inf'
+    elseif val == -math_huge then
+      return '-.inf'
+    elseif val == math_floor(val) then
+      return string_format('%d', val)
+    else
+      return string_format('%.14g', val)
+    end
+  elseif t == 'string' then
+    return encode_string(val)
+  elseif t == 'table' then
+    if is_array(val) then
+      return encode_array(val, indent)
+    else
+      return encode_table(val, indent)
+    end
+  else
+    error("yaml.encode: unsupported type '" .. t .. "'")
+  end
+end
+
+-------------------------------------------------------------------------------
 -- Public API
 -------------------------------------------------------------------------------
 
-function yaml.eval(str)
-  return Parser.new(tokenize(str)):parse()
+function yaml.encode(val)
+  return encode_value(val, 0)
 end
 
-function yaml.dump(tt)
-  print('return ' .. table_print_value(tt))
+function yaml.decode(str)
+  return Parser.new(tokenize(str)):parse()
 end
 
 yaml.tokenize = tokenize
