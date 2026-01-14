@@ -211,7 +211,7 @@ if #failures > 0 then
   for _, failure in ipairs(failures) do
     print(string.format('  %s: %s', failure.name, failure.error))
   end
-  os.exit(1)
+  error('Tests failed')
 end
 
 print('All interpolation tests passed!')

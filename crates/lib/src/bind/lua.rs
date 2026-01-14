@@ -266,7 +266,7 @@ mod tests {
   use crate::lua::globals::register_globals;
 
   fn create_test_lua_with_manifest() -> LuaResult<(Lua, Rc<RefCell<Manifest>>)> {
-    let lua = Lua::new();
+    let lua = crate::lua::runtime::create_lua(false)?;
     let manifest = Rc::new(RefCell::new(Manifest::default()));
 
     // register_globals sets up sys table including sys.build and sys.bind

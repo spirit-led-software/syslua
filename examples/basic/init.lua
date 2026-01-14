@@ -11,12 +11,12 @@ return {
     local path = sys.path
 
     file.setup({
-      target = path.resolve(path.join(os.getenv('HOME'), '.config', 'starship.toml')),
-      source = path.resolve(path.join(inputs.dotfiles.path, 'config', 'starship.toml')), -- config from an input
+      target = path.resolve(path.join(sys.getenv('HOME'), '.config', 'starship.toml')),
+      source = path.resolve(path.join(inputs.dotfiles.path, 'config', 'starship.toml')),
     })
     file.setup({
-      target = path.resolve(path.join(os.getenv('HOME'), '.ssh')),
-      source = path.resolve(path.join(sys.dir, '..', 'dotfiles', '.ssh')), -- config living alongside this init.lua
+      target = path.resolve(path.join(sys.getenv('HOME'), '.ssh')),
+      source = path.resolve(path.join(sys.dir, '..', 'dotfiles', '.ssh')),
       mutable = true,
     })
   end,

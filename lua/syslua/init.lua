@@ -2,7 +2,8 @@
 ---@field pkgs syslua.pkgs
 ---@field environment syslua.environment
 ---@field programs syslua.programs
----@field user syslua.user
+---@field users syslua.users
+---@field groups syslua.groups
 ---@field lib syslua.lib
 ---@field f fun(str: string, values?: table): string String interpolation (f-string style)
 ---@field interpolate fun(str: string, values?: table): string String interpolation
@@ -40,10 +41,7 @@ setmetatable(M, {
 
 M.setup = function()
   local unix_path = '/bin:/usr/bin'
-  local win_path = (os.getenv('SystemDrive') or 'C:')
-    .. '\\Windows\\System32;'
-    .. (os.getenv('SystemDrive') or 'C:')
-    .. '\\Windows'
+  local win_path = sys.getenv('SystemDrive') .. '\\Windows\\System32;' .. sys.getenv('SystemDrive') .. '\\Windows'
 
   local function script_impl(ctx, format, content, opts)
     opts = opts or {}

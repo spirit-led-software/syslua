@@ -1,14 +1,14 @@
 local prio = require('syslua.priority')
-local interpolate = require('syslua.interpolation')
+local f = require('syslua.interpolation')
 
----@class syslua.user
+---@class syslua.users
 local M = {}
 
 -- ============================================================================
 -- Type Definitions
 -- ============================================================================
 
----@class syslua.user.Options
+---@class syslua.users.UserOptions
 ---@field description? syslua.Option<string> User description/comment
 ---@field homeDir syslua.Option<string> Home directory path (required)
 ---@field config syslua.Option<string> Path to user's syslua config (required)
@@ -17,26 +17,26 @@ local M = {}
 ---@field groups? syslua.MergeableOption<string[]> Groups to add user to (must exist)
 ---@field preserveHomeOnRemove? syslua.Option<boolean> Keep home directory when user is removed (default: false)
 
----@alias syslua.user.UserMap table<string, syslua.user.Options>
+---@alias syslua.users.Options table<string, syslua.users.UserOptions>
 
 -- Command builder input types (subset of Options for type safety)
 
----@class syslua.user.CreateCmdOpts
+---@class syslua.users.CreateCmdOpts
 ---@field description? string User description/comment
 ---@field homeDir string Home directory path (required)
 ---@field shell? BuildRef Login shell package
 ---@field groups? string[] Groups to add user to
 ---@field initialPassword? string Initial password (plaintext)
 
----@class syslua.user.UpdateCmdOpts
+---@class syslua.users.UpdateCmdOpts
 ---@field description? string User description/comment
 ---@field shell? BuildRef Login shell package
 ---@field groups? string[] Groups to add user to
 
----@class syslua.user.DescriptionOnlyOpts
+---@class syslua.users.DescriptionOnlyOpts
 ---@field description? string User description/comment
 
----@class syslua.user.Defaults
+---@class syslua.users.UserOptionsDefaults
 ---@field description string
 ---@field homeDir nil
 ---@field config nil
@@ -55,13 +55,9 @@ local BIND_ID_PREFIX = '__syslua_user_'
 -- Default Options
 -- ============================================================================
 
----@type syslua.user.Defaults
+---@type syslua.users.UserOptionsDefaults
 M.defaults = {
   description = '',
-  homeDir = nil,
-  config = nil,
-  shell = nil,
-  initialPassword = nil,
   groups = prio.mergeable({ default = {} }),
   preserveHomeOnRemove = false,
 }
@@ -94,7 +90,7 @@ end
 
 ---Build Linux user creation command
 ---@param name string
----@param opts syslua.user.CreateCmdOpts
+---@param opts syslua.users.CreateCmdOpts
 ---@return string bin, string[] args
 local function linux_create_user_cmd(name, opts)
   local args = { '-m', '-d', opts.homeDir }
@@ -120,7 +116,7 @@ end
 
 ---Build macOS user creation command
 ---@param name string
----@param opts syslua.user.CreateCmdOpts
+---@param opts syslua.users.CreateCmdOpts
 ---@return string bin, string[] args
 local function darwin_create_user_cmd(name, opts)
   local args = { '-addUser', name }
@@ -155,7 +151,7 @@ end
 
 ---Build Linux user update command (for existing users)
 ---@param name string
----@param opts syslua.user.UpdateCmdOpts
+---@param opts syslua.users.UpdateCmdOpts
 ---@return string bin, string[] args
 local function linux_update_user_cmd(name, opts)
   local args = {}
@@ -170,7 +166,7 @@ local function linux_update_user_cmd(name, opts)
   table.insert(args, shell)
 
   if opts.groups and #opts.groups > 0 then
-    table.insert(args, '-G')
+    table.insert(args, '-aG')
     table.insert(args, table.concat(opts.groups, ','))
   end
 
@@ -181,7 +177,7 @@ end
 
 ---Build macOS user update commands (returns shell script)
 ---@param name string
----@param opts syslua.user.UpdateCmdOpts
+---@param opts syslua.users.UpdateCmdOpts
 ---@return string
 local function darwin_update_user_script(name, opts)
   local cmds = {}
@@ -189,37 +185,28 @@ local function darwin_update_user_script(name, opts)
   if opts.description and opts.description ~= '' then
     table.insert(
       cmds,
-      interpolate(
-        'dscl . -create /Users/{{name}} RealName "{{description}}"',
-        { name = name, description = opts.description }
-      )
+      f('dscl . -create /Users/{{name}} RealName "{{description}}"', { name = name, description = opts.description })
     )
   end
 
   local shell = get_shell_path(opts.shell)
-  table.insert(
-    cmds,
-    interpolate('dscl . -create /Users/{{name}} UserShell "{{shell}}"', { name = name, shell = shell })
-  )
+  table.insert(cmds, f('dscl . -create /Users/{{name}} UserShell "{{shell}}"', { name = name, shell = shell }))
 
   return table.concat(cmds, ' && ')
 end
 
 ---Build Windows user update PowerShell script (for existing users)
 ---@param name string
----@param opts syslua.user.DescriptionOnlyOpts
+---@param opts syslua.users.DescriptionOnlyOpts
 ---@return string
 local function windows_update_user_script(name, opts)
   local description = opts.description or ''
-  return interpolate(
-    'Set-LocalUser -Name "{{name}}" -Description "{{description}}"',
-    { name = name, description = description }
-  )
+  return f('Set-LocalUser -Name "{{name}}" -Description "{{description}}"', { name = name, description = description })
 end
 
 ---Build Windows user creation PowerShell script
 ---@param name string
----@param opts syslua.user.CreateCmdOpts
+---@param opts syslua.users.CreateCmdOpts
 ---@return string
 local function windows_create_user_script(name, opts)
   local lines = {}
@@ -229,14 +216,11 @@ local function windows_create_user_script(name, opts)
   if opts.initialPassword then
     table.insert(
       lines,
-      interpolate(
-        '$securePass = ConvertTo-SecureString "{{password}}" -AsPlainText -Force',
-        { password = opts.initialPassword }
-      )
+      f('$securePass = ConvertTo-SecureString "{{password}}" -AsPlainText -Force', { password = opts.initialPassword })
     )
     table.insert(
       lines,
-      interpolate(
+      f(
         'New-LocalUser -Name "{{name}}" -Description "{{description}}" -Password $securePass',
         { name = name, description = description }
       )
@@ -244,7 +228,7 @@ local function windows_create_user_script(name, opts)
   else
     table.insert(
       lines,
-      interpolate(
+      f(
         'New-LocalUser -Name "{{name}}" -Description "{{description}}" -NoPassword',
         { name = name, description = description }
       )
@@ -254,7 +238,7 @@ local function windows_create_user_script(name, opts)
   -- Create home directory
   table.insert(
     lines,
-    interpolate('New-Item -ItemType Directory -Path "{{homeDir}}" -Force | Out-Null', { homeDir = opts.homeDir })
+    f('New-Item -ItemType Directory -Path "{{homeDir}}" -Force | Out-Null', { homeDir = opts.homeDir })
   )
 
   -- Add to groups
@@ -262,7 +246,7 @@ local function windows_create_user_script(name, opts)
     for _, group in ipairs(opts.groups) do
       table.insert(
         lines,
-        interpolate(
+        f(
           'Add-LocalGroupMember -Group "{{group}}" -Member "{{name}}" -ErrorAction Stop',
           { group = group, name = name }
         )
@@ -307,12 +291,12 @@ end
 ---@return string
 local function windows_delete_user_script(name, home_dir, preserve_home)
   local lines = {
-    interpolate('Remove-LocalUser -Name "{{name}}"', { name = name }),
+    f('Remove-LocalUser -Name "{{name}}"', { name = name }),
   }
   if not preserve_home then
     table.insert(
       lines,
-      interpolate('Remove-Item -Recurse -Force "{{home_dir}}" -ErrorAction SilentlyContinue', { home_dir = home_dir })
+      f('Remove-Item -Recurse -Force "{{home_dir}}" -ErrorAction SilentlyContinue', { home_dir = home_dir })
     )
   end
   return table.concat(lines, '; ')
@@ -369,7 +353,7 @@ local function unix_run_as_user_cmd(username, home_dir, config_path)
   local parent_store = get_parent_store()
   local resolved_config = resolve_config_path(config_path)
 
-  local cmd = interpolate(
+  local cmd = f(
     'SYSLUA_STORE={{user_store}} SYSLUA_PARENT_STORE={{parent_store}} sys apply {{config}}',
     { user_store = user_store, parent_store = parent_store, config = resolved_config }
   )
@@ -385,7 +369,7 @@ local function unix_destroy_as_user_cmd(username, home_dir)
   local user_store = get_user_store(home_dir)
   local parent_store = get_parent_store()
 
-  local cmd = interpolate(
+  local cmd = f(
     'SYSLUA_STORE={{user_store}} SYSLUA_PARENT_STORE={{parent_store}} sys destroy',
     { user_store = user_store, parent_store = parent_store }
   )
@@ -403,7 +387,7 @@ local function windows_run_as_user_script(username, home_dir, config_path)
   local parent_store = get_parent_store():gsub('/', '\\')
   local resolved_config = resolve_config_path(config_path):gsub('/', '\\')
 
-  return interpolate(
+  return f(
     [[
 $env:SYSLUA_STORE = "{{user_store}}"
 $env:SYSLUA_PARENT_STORE = "{{parent_store}}"
@@ -439,7 +423,7 @@ local function windows_destroy_as_user_script(username, home_dir)
   local user_store = get_user_store(home_dir):gsub('/', '\\')
   local parent_store = get_parent_store():gsub('/', '\\')
 
-  return interpolate(
+  return f(
     [[
 $env:SYSLUA_STORE = "{{user_store}}"
 $env:SYSLUA_PARENT_STORE = "{{parent_store}}"
@@ -475,136 +459,21 @@ end
 ---@param username string
 ---@return string
 local function linux_user_exists_check(username)
-  return interpolate('id "{{username}}" >/dev/null 2>&1', { username = username })
+  return f('id "{{username}}" >/dev/null 2>&1', { username = username })
 end
 
 ---Check if user exists on macOS
 ---@param username string
 ---@return string
 local function darwin_user_exists_check(username)
-  return interpolate('dscl . -read /Users/{{username}} >/dev/null 2>&1', { username = username })
+  return f('dscl . -read /Users/{{username}} >/dev/null 2>&1', { username = username })
 end
 
 ---Check if user exists on Windows (PowerShell condition expression)
 ---@param username string
 ---@return string
 local function windows_user_exists_check(username)
-  return interpolate('(Get-LocalUser -Name "{{username}}" -ErrorAction SilentlyContinue)', { username = username })
-end
-
--- ============================================================================
--- Validation Helpers
--- ============================================================================
-
----Get all existing groups on Linux (batch operation)
----@return table<string, boolean>
-local function linux_get_all_groups()
-  local handle = io.popen('getent group | cut -d: -f1')
-  if not handle then
-    error('Failed to execute getent: io.popen returned nil')
-  end
-  local existing = {}
-  for line in handle:lines() do
-    existing[line] = true
-  end
-  handle:close()
-  return existing
-end
-
----Get all existing groups on macOS (batch operation)
----@return table<string, boolean>
-local function darwin_get_all_groups()
-  local handle = io.popen('dscl . -list /Groups')
-  if not handle then
-    error('Failed to execute dscl: io.popen returned nil')
-  end
-  local existing = {}
-  for line in handle:lines() do
-    existing[line] = true
-  end
-  handle:close()
-  return existing
-end
-
----Get all existing groups on Windows (batch operation)
----@return table<string, boolean>
-local function windows_get_all_groups()
-  local handle = io.popen('powershell -NoProfile -Command "Get-LocalGroup | ForEach-Object { $_.Name }"')
-  if not handle then
-    error('Failed to execute PowerShell: io.popen returned nil')
-  end
-  local existing = {}
-  for line in handle:lines() do
-    local group = line:gsub('%s+$', '')
-    if group ~= '' then
-      existing[group] = true
-    end
-  end
-  handle:close()
-  return existing
-end
-
----Get all existing groups (cross-platform, single shell spawn)
----@return table<string, boolean>
-local function get_all_groups()
-  if sys.os == 'linux' then
-    return linux_get_all_groups()
-  elseif sys.os == 'darwin' then
-    return darwin_get_all_groups()
-  elseif sys.os == 'windows' then
-    return windows_get_all_groups()
-  end
-  return {}
-end
-
----Validate that all groups exist (batch operation)
----@param groups string[] List of groups to check
----@return string[] List of missing groups
-local function validate_groups_exist(groups)
-  if #groups == 0 then
-    return {}
-  end
-
-  local existing = get_all_groups()
-  local missing = {}
-  for _, group in ipairs(groups) do
-    if not existing[group] then
-      table.insert(missing, group)
-    end
-  end
-  return missing
-end
-
----Check if a config path exists (file or directory with init.lua)
----@param config_path string
----@return boolean, string? -- exists, resolved_path
-local function validate_config_path(config_path)
-  -- Check if it's a file ending in .lua
-  if config_path:match('%.lua$') then
-    local f = io.open(config_path, 'r')
-    if f then
-      f:close()
-      return true, config_path
-    end
-    return false, nil
-  end
-
-  -- Check if it's a directory with init.lua
-  local init_path = config_path .. '/init.lua'
-  local f = io.open(init_path, 'r')
-  if f then
-    f:close()
-    return true, init_path
-  end
-
-  -- Check if the path itself is a file (without .lua extension)
-  f = io.open(config_path, 'r')
-  if f then
-    f:close()
-    return true, config_path
-  end
-
-  return false, nil
+  return f('(Get-LocalUser -Name "{{username}}" -ErrorAction SilentlyContinue)', { username = username })
 end
 
 -- ============================================================================
@@ -612,44 +481,19 @@ end
 -- ============================================================================
 
 ---@param name string
----@param opts syslua.user.Options
----@param groups string[]
----@param missing_groups_set table<string, boolean> Pre-computed set of missing groups
-local function validate_user_options(name, opts, groups, missing_groups_set)
+---@param opts syslua.users.UserOptions
+local function validate_user_options(name, opts)
   local home_dir = prio.unwrap(opts.homeDir)
   local config = prio.unwrap(opts.config)
 
   if not home_dir then
-    error(interpolate("user '{{name}}': homeDir is required", { name = name }), 0)
+    error(f("user '{{name}}': homeDir is required", { name = name }), 0)
   end
   if not config then
-    error(interpolate("user '{{name}}': config is required", { name = name }), 0)
+    error(f("user '{{name}}': config is required", { name = name }), 0)
   end
   if not sys.is_elevated then
     error('syslua.user requires elevated privileges (root/Administrator)', 0)
-  end
-
-  -- Validate config path exists
-  local config_exists = validate_config_path(config)
-  if not config_exists then
-    error(interpolate("user '{{name}}': config path does not exist: {{config}}", { name = name, config = config }), 0)
-  end
-
-  -- Check user's groups against pre-validated set
-  local user_missing = {}
-  for _, group in ipairs(groups) do
-    if missing_groups_set[group] then
-      table.insert(user_missing, group)
-    end
-  end
-  if #user_missing > 0 then
-    error(
-      interpolate(
-        "user '{{name}}': groups do not exist: {{groups}}",
-        { name = name, groups = table.concat(user_missing, ', ') }
-      ),
-      0
-    )
   end
 end
 
@@ -691,7 +535,7 @@ end
 
 ---Create a bind for a single user
 ---@param name string
----@param opts syslua.user.Options
+---@param opts syslua.users.UserOptions
 ---@param groups string[]
 local function create_user_bind(name, opts, groups)
   local bind_id = BIND_ID_PREFIX .. name
@@ -742,7 +586,7 @@ local function create_user_bind(name, opts, groups)
           bin = '/bin/sh',
           args = {
             '-c',
-            interpolate(
+            f(
               'if ! {{exists_check}}; then {{create_cmd}}; else {{update_cmd}}; fi',
               { exists_check = exists_check, create_cmd = create_cmd, update_cmd = update_cmd }
             ),
@@ -755,7 +599,7 @@ local function create_user_bind(name, opts, groups)
             bin = '/bin/sh',
             args = {
               '-c',
-              interpolate(
+              f(
                 'echo "{{username}}:{{password}}" | chpasswd',
                 { username = inputs.username, password = inputs.initial_password }
               ),
@@ -782,7 +626,7 @@ local function create_user_bind(name, opts, groups)
           bin = '/bin/sh',
           args = {
             '-c',
-            interpolate(
+            f(
               'if ! {{exists_check}}; then {{create_cmd}}; else {{update_script}}; fi',
               { exists_check = exists_check, create_cmd = create_cmd, update_script = update_script }
             ),
@@ -813,7 +657,7 @@ local function create_user_bind(name, opts, groups)
           args = {
             '-NoProfile',
             '-Command',
-            interpolate(
+            f(
               'if (-not {{exists_check}}) { {{create_script}} } else { {{update_script}} }',
               { exists_check = exists_check, create_script = create_script, update_script = update_script }
             ),
@@ -827,7 +671,7 @@ local function create_user_bind(name, opts, groups)
             args = {
               '-NoProfile',
               '-Command',
-              interpolate(
+              f(
                 'Add-LocalGroupMember -Group "{{group}}" -Member "{{username}}" -ErrorAction SilentlyContinue',
                 { group = group, username = inputs.username }
               ),
@@ -866,7 +710,7 @@ local function create_user_bind(name, opts, groups)
           bin = '/bin/sh',
           args = {
             '-c',
-            interpolate(
+            f(
               'if {{exists_check}}; then {{destroy_cmd}}; fi',
               { exists_check = exists_check, destroy_cmd = destroy_cmd }
             ),
@@ -880,10 +724,7 @@ local function create_user_bind(name, opts, groups)
           bin = '/bin/sh',
           args = {
             '-c',
-            interpolate(
-              'if {{exists_check}}; then {{delete_cmd}}; fi',
-              { exists_check = exists_check, delete_cmd = delete_cmd }
-            ),
+            f('if {{exists_check}}; then {{delete_cmd}}; fi', { exists_check = exists_check, delete_cmd = delete_cmd }),
           },
         })
       elseif sys.os == 'darwin' then
@@ -896,7 +737,7 @@ local function create_user_bind(name, opts, groups)
           bin = '/bin/sh',
           args = {
             '-c',
-            interpolate(
+            f(
               'if {{exists_check}}; then {{destroy_cmd}}; fi',
               { exists_check = exists_check, destroy_cmd = destroy_cmd }
             ),
@@ -910,10 +751,7 @@ local function create_user_bind(name, opts, groups)
           bin = '/bin/sh',
           args = {
             '-c',
-            interpolate(
-              'if {{exists_check}}; then {{delete_cmd}}; fi',
-              { exists_check = exists_check, delete_cmd = delete_cmd }
-            ),
+            f('if {{exists_check}}; then {{delete_cmd}}; fi', { exists_check = exists_check, delete_cmd = delete_cmd }),
           },
         })
       elseif sys.os == 'windows' then
@@ -926,7 +764,7 @@ local function create_user_bind(name, opts, groups)
           args = {
             '-NoProfile',
             '-Command',
-            interpolate(
+            f(
               'if ({{exists_check}}) { {{destroy_script}} }',
               { exists_check = exists_check, destroy_script = destroy_script }
             ),
@@ -940,7 +778,7 @@ local function create_user_bind(name, opts, groups)
           args = {
             '-NoProfile',
             '-Command',
-            interpolate(
+            f(
               'if ({{exists_check}}) { {{delete_script}} }',
               { exists_check = exists_check, delete_script = delete_script }
             ),
@@ -952,46 +790,21 @@ local function create_user_bind(name, opts, groups)
 end
 
 ---Set up users according to the provided definitions
----@param users syslua.user.UserMap
+---@param users syslua.users.Options
 function M.setup(users)
   if not users or next(users) == nil then
     error('syslua.user.setup: at least one user definition is required', 2)
   end
 
-  -- Phase 1: Collect all data and unique groups from all users
-  local user_data = {} -- name -> { merged, groups }
-  local all_groups = {} -- unique groups across all users
-
   for name, opts in pairs(users) do
     local merged = prio.merge(M.defaults, opts)
     if not merged then
-      error(interpolate("user '{{name}}': failed to merge options", { name = name }), 2)
+      error(f("user '{{name}}': failed to merge options", { name = name }), 2)
     end
 
     local groups = resolve_groups(merged.groups)
-    user_data[name] = { merged = merged, groups = groups }
-
-    -- Collect unique groups
-    for _, group in ipairs(groups) do
-      all_groups[group] = true
-    end
-  end
-
-  -- Phase 2: Batch validate all groups with single shell spawn
-  local unique_groups = {}
-  for group in pairs(all_groups) do
-    table.insert(unique_groups, group)
-  end
-  local missing_groups = validate_groups_exist(unique_groups)
-  local missing_set = {}
-  for _, group in ipairs(missing_groups) do
-    missing_set[group] = true
-  end
-
-  -- Phase 3: Validate each user and create binds
-  for name, data in pairs(user_data) do
-    validate_user_options(name, data.merged, data.groups, missing_set)
-    create_user_bind(name, data.merged, data.groups)
+    validate_user_options(name, merged)
+    create_user_bind(name, merged, groups)
   end
 end
 

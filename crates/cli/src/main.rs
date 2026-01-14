@@ -90,6 +90,9 @@ enum Commands {
     /// Check unchanged binds for drift and repair if needed
     #[arg(long)]
     repair: bool,
+    /// Allow impure Lua libs (io, os). Breaks determinism.
+    #[arg(long)]
+    impure: bool,
     /// Output format
     #[arg(short, long, value_enum, default_value = "text")]
     output: OutputFormat,
@@ -97,6 +100,9 @@ enum Commands {
   /// Evaluate a config and create a plan without applying
   Plan {
     file: String,
+    /// Allow impure Lua libs (io, os). Breaks determinism.
+    #[arg(long)]
+    impure: bool,
     /// Output format
     #[arg(short, long, value_enum, default_value = "text")]
     output: OutputFormat,
@@ -217,8 +223,13 @@ fn main() -> ExitCode {
 
   let result = match cli.command {
     Commands::Init { path } => cmd_init(&path),
-    Commands::Apply { file, repair, output } => cmd_apply(&file, repair, output),
-    Commands::Plan { file, output } => cmd_plan(&file, output),
+    Commands::Apply {
+      file,
+      repair,
+      impure,
+      output,
+    } => cmd_apply(&file, repair, impure, output),
+    Commands::Plan { file, impure, output } => cmd_plan(&file, impure, output),
     Commands::Destroy { dry_run, output } => cmd_destroy(dry_run, output),
     Commands::Diff {
       snapshot_a,

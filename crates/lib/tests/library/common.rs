@@ -24,7 +24,7 @@ fn workspace_root() -> PathBuf {
 /// Returns the Lua runtime and a reference to the manifest for inspection.
 pub fn create_test_runtime() -> LuaResult<(Lua, Rc<RefCell<Manifest>>)> {
   let manifest = Rc::new(RefCell::new(Manifest::default()));
-  let lua = create_runtime(manifest.clone())?;
+  let lua = create_runtime(manifest.clone(), false)?;
 
   // Ensure lua/syslua is in package.path
   // The runtime adds ./lua/?.lua but tests run from different CWD

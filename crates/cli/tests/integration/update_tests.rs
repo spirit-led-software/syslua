@@ -9,10 +9,10 @@ fn update_bind_with_version_change() {
   let env = TestEnv::from_fixture("bind_update.lua");
   let version_file = env.output_path().join("version.txt");
 
-  // Initial apply with v1
   env
     .sys_cmd()
     .arg("apply")
+    .arg("--impure")
     .arg(&env.config_path)
     .env("TEST_VERSION", "v1")
     .assert()
@@ -22,10 +22,10 @@ fn update_bind_with_version_change() {
   let content_v1 = std::fs::read_to_string(&version_file).unwrap();
   assert!(content_v1.contains("v1"), "should contain v1");
 
-  // Apply with v2 - should trigger update
   env
     .sys_cmd()
     .arg("apply")
+    .arg("--impure")
     .arg(&env.config_path)
     .env("TEST_VERSION", "v2")
     .assert()

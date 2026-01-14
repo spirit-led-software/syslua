@@ -47,6 +47,42 @@ pub fn register_globals(lua: &Lua, manifest: Rc<RefCell<Manifest>>) -> LuaResult
   let getenv = lua.create_function(|_, name: String| Ok(format!("$${{{{env:{}}}}}", name)))?;
   sys.set("getenv", getenv)?;
 
+  let time = lua.create_function(|_, ()| {
+    Ok(
+      std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0),
+    )
+  })?;
+  sys.set("time", time)?;
+
+  let mktime = lua.create_function(|_, table: LuaTable| {
+    let year: i32 = table.get("year")?;
+    let month: u32 = table.get("month")?;
+    let day: u32 = table.get("day")?;
+    let hour: u32 = table.get::<Option<u32>>("hour")?.unwrap_or(0);
+    let min: u32 = table.get::<Option<u32>>("min")?.unwrap_or(0);
+    let sec: u32 = table.get::<Option<u32>>("sec")?.unwrap_or(0);
+
+    let y = year - 1;
+    let mut days = y as i64 * 365 + (y as i64 / 4) - (y as i64 / 100) + (y as i64 / 400);
+
+    let month_days = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+    days += month_days[(month - 1) as usize] as i64 + day as i64 - 1;
+
+    let is_leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    if month > 2 && is_leap {
+      days += 1;
+    }
+
+    const UNIX_EPOCH_DAYS: i64 = 719528;
+    days -= UNIX_EPOCH_DAYS;
+
+    Ok(days * 86400 + hour as i64 * 3600 + min as i64 * 60 + sec as i64)
+  })?;
+  sys.set("mktime", mktime)?;
+
   // Register sys.build{}
   register_sys_build(lua, &sys, manifest.clone())?;
 
@@ -114,7 +150,7 @@ mod tests {
   use super::*;
 
   fn create_test_lua() -> LuaResult<Lua> {
-    let lua = Lua::new();
+    let lua = crate::lua::runtime::create_lua(false)?;
     let manifest = Rc::new(RefCell::new(Manifest::default()));
     register_globals(&lua, manifest)?;
     Ok(lua)

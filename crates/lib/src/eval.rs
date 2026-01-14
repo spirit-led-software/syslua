@@ -30,6 +30,13 @@ pub enum EvalError {
   InputResolution(#[from] ResolveError),
 }
 
+/// Options for config evaluation.
+#[derive(Debug, Clone, Default)]
+pub struct EvalOptions {
+  /// Allow impure Lua libs (io, os). Breaks determinism but useful for tests.
+  pub impure: bool,
+}
+
 /// Evaluate a Lua configuration file and return the resulting manifest.
 ///
 /// This function:
@@ -57,14 +64,12 @@ pub enum EvalError {
 /// println!("Builds: {}", manifest.builds.len());
 /// println!("Bindings: {}", manifest.bindings.len());
 /// ```
-pub fn evaluate_config(path: &Path) -> Result<Manifest, EvalError> {
+pub fn evaluate_config(path: &Path, options: &EvalOptions) -> Result<Manifest, EvalError> {
   let manifest = Rc::new(RefCell::new(Manifest::default()));
   let config_dir = path.parent().unwrap_or(Path::new("."));
 
-  // Create runtime and evaluate in a block to ensure lua is dropped
-  // before we try to unwrap the manifest Rc
   {
-    let lua = runtime::create_runtime(manifest.clone())?;
+    let lua = runtime::create_runtime(manifest.clone(), options.impure)?;
     let config = runtime::load_file(&lua, path)?;
 
     // Config should return a table with { inputs, setup }
@@ -410,7 +415,7 @@ mod tests {
     )
     .unwrap();
 
-    let manifest = evaluate_config(&config_path)?;
+    let manifest = evaluate_config(&config_path, &EvalOptions::default())?;
     assert!(manifest.builds.is_empty());
     assert!(manifest.bindings.is_empty());
     Ok(())
@@ -438,7 +443,7 @@ mod tests {
     )
     .unwrap();
 
-    let manifest = evaluate_config(&config_path)?;
+    let manifest = evaluate_config(&config_path, &EvalOptions::default())?;
     assert_eq!(manifest.builds.len(), 1);
     assert!(manifest.bindings.is_empty());
 
@@ -472,7 +477,7 @@ mod tests {
     )
     .unwrap();
 
-    let manifest = evaluate_config(&config_path)?;
+    let manifest = evaluate_config(&config_path, &EvalOptions::default())?;
     assert!(manifest.builds.is_empty());
     assert_eq!(manifest.bindings.len(), 1);
     Ok(())
@@ -500,8 +505,8 @@ mod tests {
     )
     .unwrap();
 
-    let manifest1 = evaluate_config(&config_path)?;
-    let manifest2 = evaluate_config(&config_path)?;
+    let manifest1 = evaluate_config(&config_path, &EvalOptions::default())?;
+    let manifest2 = evaluate_config(&config_path, &EvalOptions::default())?;
 
     let hash1 = manifest1.compute_hash().unwrap();
     let hash2 = manifest2.compute_hash().unwrap();
@@ -524,7 +529,7 @@ mod tests {
     )
     .unwrap();
 
-    let result = evaluate_config(&config_path);
+    let result = evaluate_config(&config_path, &EvalOptions::default());
     assert!(result.is_err());
   }
 
@@ -534,7 +539,7 @@ mod tests {
     let config_path = temp_dir.path().join("init.lua");
     fs::write(&config_path, r#"return "not a table""#).unwrap();
 
-    let result = evaluate_config(&config_path);
+    let result = evaluate_config(&config_path, &EvalOptions::default());
     assert!(result.is_err());
   }
 
@@ -567,7 +572,7 @@ mod tests {
     )
     .unwrap();
 
-    let manifest = evaluate_config(&config_path)?;
+    let manifest = evaluate_config(&config_path, &EvalOptions::default())?;
     assert!(manifest.builds.is_empty());
 
     // Verify lock file was created
@@ -608,7 +613,7 @@ mod tests {
     )
     .unwrap();
 
-    evaluate_config(&config_path)?;
+    evaluate_config(&config_path, &EvalOptions::default())?;
     Ok(())
   }
 
@@ -643,7 +648,7 @@ mod tests {
     )
     .unwrap();
 
-    evaluate_config(&config_path)?;
+    evaluate_config(&config_path, &EvalOptions::default())?;
     Ok(())
   }
 
@@ -681,8 +686,7 @@ mod tests {
     )
     .unwrap();
 
-    // Should fail with namespace conflict
-    let result = evaluate_config(&config_path);
+    let result = evaluate_config(&config_path, &EvalOptions::default());
     assert!(result.is_err(), "expected namespace conflict error");
 
     let err_msg = result.unwrap_err().to_string();
@@ -733,7 +737,7 @@ mod tests {
     )
     .unwrap();
 
-    evaluate_config(&config_path)?;
+    evaluate_config(&config_path, &EvalOptions::default())?;
     Ok(())
   }
 
@@ -807,7 +811,7 @@ mod tests {
     )
     .unwrap();
 
-    evaluate_config(&config_path)?;
+    evaluate_config(&config_path, &EvalOptions::default())?;
     Ok(())
   }
 
@@ -843,7 +847,7 @@ mod tests {
     )
     .unwrap();
 
-    evaluate_config(&config_path)?;
+    evaluate_config(&config_path, &EvalOptions::default())?;
     Ok(())
   }
 
@@ -888,7 +892,7 @@ mod tests {
 
     // This should work even though follows isn't fully implemented yet
     // (we're just testing that the parsing works)
-    evaluate_config(&config_path)?;
+    evaluate_config(&config_path, &EvalOptions::default())?;
     Ok(())
   }
 }
